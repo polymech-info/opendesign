@@ -85,3 +85,5 @@ npm run dev
 ## License
 
 MIT. Upstream copyright Clawnify; this fork Polymech. Tabler icons are MIT ([tabler/tabler-icons](https://github.com/tabler/tabler-icons)).
+
+![](./docs/assets/hopphopp.png)
