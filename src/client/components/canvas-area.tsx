@@ -27,19 +27,30 @@ export function CanvasArea() {
     setZoomRaw(0.58);
   }, [canvasWidth, canvasHeight]);
 
-  // Recalculate on resize
+  // Recalculate on resize (rAF so sidebar width animation doesn't trip ResizeObserver loop)
+  const fitScaleRef = useRef(0);
   useEffect(() => {
     const wrapper = wrapperRef.current;
     if (!wrapper) return;
-    const obs = new ResizeObserver(() => {
+    let raf = 0;
+    const apply = () => {
+      raf = 0;
       const padding = 120;
-      const availW = wrapper.clientWidth - padding;
-      const fit = Math.min(availW / canvasWidth, 1);
+      const fit = Math.min((wrapper.clientWidth - padding) / canvasWidth, 1);
+      if (Math.abs(fit - fitScaleRef.current) < 0.001) return;
+      fitScaleRef.current = fit;
       setFitScale(fit);
+    };
+    const obs = new ResizeObserver(() => {
+      if (raf) return;
+      raf = requestAnimationFrame(apply);
     });
     obs.observe(wrapper);
-    return () => obs.disconnect();
-  }, [canvasWidth, canvasHeight]);
+    return () => {
+      obs.disconnect();
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [canvasWidth, canvasHeight, setFitScale]);
 
   // Cmd+wheel zoom towards mouse position
   const zoomRef = useRef(zoom);

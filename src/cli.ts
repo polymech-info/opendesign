@@ -12,6 +12,7 @@ import { listenHono } from "./server/listen.js";
 import { resolveRoots } from "./server/paths.js";
 import { mountClient } from "./server/serve-client.js";
 import { devPortFile } from "./server/dev-port.js";
+import { ensureLlmServer } from "./server/llm.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const runningFromSource = path.basename(here) === "src";
@@ -118,7 +119,8 @@ const noBrowser =
   flags.has("--no-browser") || process.env.OPEND_NO_BROWSER === "1" || runningFromSource;
 
 const roots = resolveRoots(targetDir);
-const app = createOpenDesignApp({ roots, iconDir });
+const llm = await ensureLlmServer({ cwd: roots.project, searchFrom: pkgRoot });
+const app = createOpenDesignApp({ roots, iconDir, llm });
 
 if (!runningFromSource && fs.existsSync(clientDir)) {
   mountClient(app, clientDir);
@@ -134,9 +136,11 @@ console.log(`\n  @polymech/opendesign\n`);
 console.log(`  Local:   ${ui}`);
 console.log(`  Project: ${roots.project}`);
 console.log(`  Global:  ${roots.global}`);
-console.log(`  Merge:   union — project shadows same id/key\n`);
+console.log(`  Merge:   union — project shadows same id/key`);
+console.log(`  LLM:     ${llm.url}\n`);
 
 const cleanup = () => {
+  llm.stop();
   try {
     fs.unlinkSync(portFile);
   } catch {

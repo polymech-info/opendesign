@@ -22,10 +22,12 @@ import {
   putUpload,
   type UploadKind,
 } from "./uploads.js";
+import { mountLlmProxy, type LlmTarget } from "./llm.js";
 
 export type AppOptions = {
   roots: Roots;
   iconDir: string;
+  llm?: LlmTarget;
 };
 
 const DesignSchema = z.object({
@@ -84,12 +86,13 @@ function uploadKindFromQuery(value: string | undefined): UploadKind {
 }
 
 export function createOpenDesignApp(opts: AppOptions) {
-  const { roots, iconDir } = opts;
+  const { roots, iconDir, llm } = opts;
   ensureLayouts(roots);
 
   const app = new OpenAPIHono();
 
   app.use("*", async (c, next) => tablerMiddleware(iconDir, c, next));
+  if (llm) mountLlmProxy(app, llm);
 
   app.get("/api/meta", (c) =>
     c.json({
@@ -163,6 +166,7 @@ Lists MERGE both folders (union). Same id/filename: project copy is used; unique
 - GET /api/icons/svg
 - POST /api/icons/download
 - GET /api/openapi.json
+- ALL /api/llm/*  (proxy to tanit-cli llm agent --serve)
 `)
   );
 

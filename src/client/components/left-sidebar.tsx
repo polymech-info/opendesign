@@ -10,6 +10,7 @@ import {
   LayoutGrid,
   Sparkles,
   Layers,
+  MessageCircle,
   ClipboardPaste,
   Shapes,
   Diamond,
@@ -25,12 +26,14 @@ import { MediaLibrary } from "./media-library";
 import { LayersPanel } from "./layers-panel";
 import { IconsPanel } from "./icons-panel";
 import { ElementsLibrary } from "./elements-library";
+import { ChatPanel } from "../modules/ai/ChatPanel";
 import { GRADIENT_PRESETS } from "../lib/fill-presets";
 import type { ShapeKind } from "../lib/shapes";
 
-type Section = "templates" | "text" | "shapes" | "icons" | "layers" | "images" | "background" | "designs";
+type Section = "chat" | "templates" | "text" | "shapes" | "icons" | "layers" | "images" | "background" | "designs";
 
 const SECTIONS: { key: Section; icon: typeof LayoutGrid; label: string }[] = [
+  { key: "chat", icon: MessageCircle, label: "Chat" },
   { key: "templates", icon: Sparkles, label: "Templates" },
   { key: "shapes", icon: Square, label: "Elements" },
   { key: "icons", icon: Shapes, label: "Icons" },
@@ -42,6 +45,7 @@ const SECTIONS: { key: Section; icon: typeof LayoutGrid; label: string }[] = [
 ];
 
 const SECTION_TITLES: Record<Section, string> = {
+  chat: "Chat",
   templates: "Templates",
   shapes: "Elements",
   icons: "Icons",
@@ -81,11 +85,13 @@ export function LeftSidebar() {
   };
 
   const isOpen = activeSection !== null;
+  const isChat = activeSection === "chat";
+  const panelWidth = isChat ? 360 : 240;
 
   return (
     <aside class="flex flex-row shrink-0">
       {/* Icon Rail */}
-      <div class="w-[70px] bg-white border-r border-zinc-200 flex flex-col items-center pt-2 gap-0.5 shrink-0">
+      <div class="w-[70px] bg-white border-r border-zinc-200 flex flex-col items-center pt-2 gap-0.5 shrink-0 overflow-y-auto">
         {SECTIONS.map((s) => (
           <button
             key={s.key}
@@ -105,11 +111,14 @@ export function LeftSidebar() {
       {/* Content Panel */}
       <div
         class="bg-white border-r border-zinc-200 overflow-hidden transition-all duration-200 ease-in-out"
-        style={{ width: isOpen ? "240px" : "0px" }}
+        style={{ width: isOpen ? `${panelWidth}px` : "0px" }}
       >
-        <div class="w-[240px] h-full flex flex-col">
-          {activeSection && (
-            <>
+        <div class="h-full" style={{ width: `${panelWidth}px` }}>
+          <div class={`h-full min-h-0 ${isChat ? "flex flex-col" : "hidden"}`} style={{ width: "360px" }}>
+            <ChatPanel />
+          </div>
+          {activeSection && activeSection !== "chat" && (
+            <div class="h-full flex flex-col" style={{ width: "240px" }}>
               <div class="px-3 pt-3 pb-2 shrink-0">
                 <h2 class="text-xs font-semibold text-zinc-800 uppercase tracking-wide m-0">
                   {SECTION_TITLES[activeSection]}
@@ -267,7 +276,7 @@ export function LeftSidebar() {
 
                 {activeSection === "designs" && <DesignList />}
               </div>
-            </>
+            </div>
           )}
         </div>
       </div>

@@ -74,6 +74,40 @@ input[type="color"]::-webkit-color-swatch {
 }
 
 /* ── Select ────────────────────────────────────────────────────────── */
+.chat-md {
+  @apply text-[12px] leading-relaxed break-words;
+}
+.chat-md > *:first-child { margin-top: 0; }
+.chat-md > *:last-child { margin-bottom: 0; }
+.chat-md p { @apply my-1.5; }
+.chat-md h1, .chat-md h2, .chat-md h3, .chat-md h4 {
+  @apply font-semibold text-zinc-900 mt-2 mb-1;
+}
+.chat-md h1 { @apply text-[15px]; }
+.chat-md h2 { @apply text-[13px]; }
+.chat-md h3 { @apply text-[12px]; }
+.chat-md ul, .chat-md ol { @apply my-1.5 pl-4; }
+.chat-md ul { list-style: disc; }
+.chat-md ol { list-style: decimal; }
+.chat-md li { @apply my-0.5; }
+.chat-md a { @apply text-accent underline underline-offset-2 break-all; }
+.chat-md blockquote {
+  @apply my-1.5 pl-2 border-l-2 border-zinc-300 text-zinc-600;
+}
+.chat-md pre {
+  @apply my-1.5 p-2 rounded-md bg-zinc-800 text-zinc-100 overflow-x-auto text-[11px];
+}
+.chat-md :not(pre) > code {
+  @apply px-1 py-0.5 rounded bg-zinc-200/80 text-[11px] font-mono;
+}
+.chat-md img {
+  @apply my-1 rounded-md border border-zinc-200 max-w-[200px] max-h-[200px] object-cover;
+}
+.chat-md table { @apply my-1.5 w-full text-[11px] border-collapse; }
+.chat-md th, .chat-md td { @apply border border-zinc-200 px-1.5 py-0.5 text-left; }
+.chat-md th { @apply bg-zinc-50 font-medium; }
+.chat-md hr { @apply my-2 border-zinc-200; }
+
 select {
   @apply appearance-none;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
