@@ -1,0 +1,70 @@
+{
+  "name": "@polymech/opendesign",
+  "version": "0.1.0",
+  "description": "Local canvas design editor. Install, run pm-opendesign, browser opens.",
+  "type": "module",
+  "bin": {
+    "pm-opendesign": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "homepage": "https://github.com/polymech-info/opendesign",
+  "scripts": {
+    "dev": "concurrently -k --kill-signal SIGKILL -n api,rspack -c green,cyan \"tsx src/cli.ts\" \"node ./scripts/wait-and-rspack.mjs\"",
+    "dev:api": "tsx src/cli.ts",
+    "dev:client": "rspack dev --mode development",
+    "build": "node scripts/build.mjs",
+    "start": "node dist/cli.js",
+    "prepublishOnly": "node scripts/build.mjs"
+  },
+  "devDependencies": {
+    "@hono/node-server": "^1.19.17",
+    "@hono/zod-openapi": "^0.18.4",
+    "@rspack/cli": "^2.2.3",
+    "@rspack/core": "^2.2.3",
+    "@rspack/dev-server": "^2.2.1",
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/node": "^22.20.2",
+    "@types/webfontloader": "^1.6.38",
+    "concurrently": "^9.2.4",
+    "css-loader": "^7.1.5",
+    "esbuild": "^0.28.2",
+    "fabric": "^7.4.0",
+    "hono": "^4.13.7",
+    "lucide-preact": "^0.575.0",
+    "open": "^11.0.3",
+    "postcss": "^8.5.28",
+    "postcss-loader": "^8.2.1",
+    "preact": "^10.29.8",
+    "style-loader": "^4.0.0",
+    "tailwindcss": "^4.3.3",
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.3",
+    "webfontloader": "^1.6.28",
+    "zod": "^3.25.76"
+  },
+  "overrides": {
+    "esbuild": "$esbuild",
+    "tar": "^7.5.21"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/polymech-info/opendesign"
+  },
+  "keywords": [
+    "design",
+    "canvas",
+    "editor",
+    "cli",
+    "fabric",
+    "graphics"
+  ]
+}
