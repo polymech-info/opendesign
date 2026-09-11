@@ -1,6 +1,12 @@
 import { useState, useCallback, useRef, useEffect } from "preact/hooks";
 import type { Design, DesignWithPages, Template, Page } from "../types";
 import { api } from "../api";
+import { bundledFeatureCardsTemplate } from "../../design/example";
+
+function withFeatureCardsTemplate(templates: Template[]): Template[] {
+  if (templates.some((t) => t.id === "feature-cards")) return templates;
+  return [bundledFeatureCardsTemplate(), ...templates];
+}
 
 export function useDesigns(getCanvasJSONForPage: (pageId: string) => string) {
   const [designs, setDesigns] = useState<Design[]>([]);
@@ -28,7 +34,7 @@ export function useDesigns(getCanvasJSONForPage: (pageId: string) => string) {
           api<Template[]>("GET", "/api/templates"),
         ]);
         setDesigns(d);
-        setTemplates(t);
+        setTemplates(withFeatureCardsTemplate(t));
       } catch (e) {
         console.error("Failed to load data:", e);
       } finally {

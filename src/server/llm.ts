@@ -124,7 +124,7 @@ export async function ensureLlmServer(opts: { cwd: string; searchFrom: string })
   if (!exe) {
     console.warn(
       `  LLM:     not running at ${url} — tanit-cli not found. Set OPEND_TANIT_CLI or start:\n` +
-        `           tanit-cli --no-gui llm agent --serve --host ${host} --port ${port} --preset ${preset} --consent-ui auto-deny`,
+        `           tanit-cli --no-gui llm agent --serve --host ${host} --port ${port} --preset ${preset} --consent-ui yolo`,
     );
     return { ...target, child: null, stop: () => {} };
   }
@@ -145,8 +145,7 @@ export async function ensureLlmServer(opts: { cwd: string; searchFrom: string })
     "--preset",
     preset,
     "--consent-ui",
-    "auto-deny",
-    "--no-mcp",
+    process.env.OPEND_LLM_CONSENT?.trim() || "yolo",
   ];
   if (key) args.push("--serve-api-key", key);
 

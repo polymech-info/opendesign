@@ -1,7 +1,17 @@
-/**
- * Extra OpenAI-compatible tools for design work.
- * Later: DSL + canvas tools. Empty until those land.
- */
-export function createDesignTools(): any[] {
-  return [];
-}
+export {
+  applyEmittedDesignTools,
+  createDesignTools,
+  getActiveDocument,
+  parseEmittedToolCalls,
+  resolveDesignDocument,
+  setActiveDocument,
+} from "../../../design/tools";
+export {
+  assistantReplyForDesignTools,
+  dedupeToolCalls,
+  formatDesignToolRuns,
+  isDesignToolOnlyReply,
+} from "../../../design/chat-feedback";
+export { designChatBrief } from "../../../design/brief";
+export { documentFromCanvasJson } from "../../../design/project";
+

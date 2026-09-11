@@ -7,6 +7,8 @@ import { HeadlessExport } from "./components/headless-export";
 import { Home } from "./components/home";
 import WebFont from "webfontloader";
 import { useEffect, useLayoutEffect } from "preact/hooks";
+import { documentFromCanvasJson } from "../design/project";
+import { setActiveDocument } from "../design/tools";
 
 export function App() {
   const { navigate, designId, exportDesignId } = useRouter();
@@ -41,6 +43,15 @@ export function App() {
       }
     }
   }, [designId, designState.loading]);
+
+  useEffect(() => {
+    if (!designId) {
+      setActiveDocument(null);
+      return;
+    }
+    const raw = designState.activePage?.canvas_json || designState.activeDesign?.canvas_json;
+    setActiveDocument(documentFromCanvasJson(raw));
+  }, [designId, designState.activeDesign?.id, designState.activePage?.id, designState.activePage?.canvas_json]);
 
   useLayoutEffect(() => {
     if (!designState.activeDesign) return;

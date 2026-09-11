@@ -39,7 +39,11 @@ export default (env = {}, argv = {}) => {
       rules: [
         {
           test: /\.[jt]sx?$/,
-          include: [path.resolve(__dirname, "src/client"), path.resolve(__dirname, "src/shared")],
+          include: [
+            path.resolve(__dirname, "src/client"),
+            path.resolve(__dirname, "src/shared"),
+            path.resolve(__dirname, "src/design"),
+          ],
           loader: "builtin:swc-loader",
           options: {
             jsc: {

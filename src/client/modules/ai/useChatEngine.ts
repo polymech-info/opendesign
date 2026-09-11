@@ -11,6 +11,12 @@ import {
   generateSessionTitle,
   type ChatSession,
 } from "./chatSessions";
+import {
+  assistantReplyForDesignTools,
+  formatDesignToolRuns,
+  isDesignToolOnlyReply,
+  parseEmittedToolCalls,
+} from "./designTools";
 
 const HISTORY_KEY = "opend-chat-prompt-history";
 const MAX_HISTORY = 40;
@@ -70,6 +76,10 @@ export function useChatEngine(namespace = "opend") {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
   const extraToolsRef = useRef<(() => any[]) | null>(null);
+  const designContextRef = useRef<(() => string | null) | null>(null);
+  const runDesignToolsRef = useRef<
+    ((text: string) => Promise<Array<{ name: string; result: unknown }>> | Array<{ name: string; result: unknown }>) | null
+  >(null);
   const isUserScrolledUpRef = useRef(false);
 
   const [sessionId, setSessionId] = useState<string>(() => crypto.randomUUID());
@@ -192,6 +202,8 @@ export function useChatEngine(namespace = "opend") {
 
   const buildApiMessages = useCallback((chatHistory: ChatMessage[], userMsg: ChatMessage) => {
     const apiMessages: any[] = [];
+    const brief = designContextRef.current?.();
+    if (brief) apiMessages.push({ role: "system", content: brief });
     for (const m of [...chatHistory, userMsg]) {
       if (m.role === "tool") continue;
       const hasImages = m.images && m.images.length > 0;
@@ -211,46 +223,6 @@ export function useChatEngine(namespace = "opend") {
     }
     return apiMessages;
   }, []);
-
-  const collectTools = useCallback(() => {
-    const extra = extraToolsRef.current?.();
-    return extra?.length ? extra : [];
-  }, []);
-
-  const runWithTools = useCallback(
-    async (client: OpenAI, apiMessages: any[], allTools: any[], assistantId: string) => {
-      const runner = client.chat.completions.runTools({ model, messages: apiMessages, tools: allTools });
-      runner.on("functionToolCall", (fnCall: any) => {
-        let argsDisplay = fnCall.arguments;
-        try {
-          const parsed = JSON.parse(fnCall.arguments);
-          argsDisplay = Object.entries(parsed)
-            .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
-            .join(", ");
-        } catch {
-          /* raw */
-        }
-        const toolMsg: ChatMessage = {
-          id: crypto.randomUUID(),
-          role: "tool",
-          content: `Calling ${fnCall.name}(${argsDisplay})`,
-          timestamp: Date.now(),
-          toolName: fnCall.name,
-        };
-        setMessages((prev) => {
-          const idx = prev.findIndex((m) => m.id === assistantId);
-          if (idx === -1) return [...prev, toolMsg];
-          return [...prev.slice(0, idx), toolMsg, ...prev.slice(idx)];
-        });
-      });
-      await runner.done();
-      const finalContent = (await runner.finalContent()) || "";
-      setMessages((prev) =>
-        prev.map((m) => (m.id === assistantId ? { ...m, content: finalContent, isStreaming: false } : m)),
-      );
-    },
-    [model],
-  );
 
   const runStreaming = useCallback(
     async (client: OpenAI, apiMessages: any[], assistantId: string, signal: AbortSignal) => {
@@ -319,6 +291,7 @@ export function useChatEngine(namespace = "opend") {
         ms: Math.round(performance.now() - started),
       });
       setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, isStreaming: false } : m)));
+      return fullContent;
     },
     [model],
   );
@@ -368,16 +341,51 @@ export function useChatEngine(namespace = "opend") {
 
       try {
         const apiMessages = buildApiMessages(messages, userMsg);
-        const tools = collectTools();
+        const brief = typeof apiMessages[0]?.content === "string" && apiMessages[0]?.role === "system";
         console.log("[Chat] send", {
           model,
           history: messages.length,
           apiMessages: apiMessages.length,
           images: msgImages.length,
-          tools: tools.map((t: any) => t?.function?.name ?? t?.name).filter(Boolean),
+          designBrief: brief,
         });
-        if (tools.length) await runWithTools(client, apiMessages, tools, assistantId);
-        else await runStreaming(client, apiMessages, assistantId, abort.signal);
+        // --serve ignores client tools[]; stream, then host-run any JSON tool_calls.
+        const text = (await runStreaming(client, apiMessages, assistantId, abort.signal)) || "";
+        const parsedCalls = parseEmittedToolCalls(text);
+        const ran = (await runDesignToolsRef.current?.(text)) ?? [];
+        const jsonOnly = isDesignToolOnlyReply(text);
+
+        setMessages((prev) =>
+          prev.map((m) => {
+            if (m.id !== assistantId) return m;
+            const done = { ...m, isStreaming: false };
+            if (!jsonOnly) return done;
+            if (ran.length) return { ...done, content: assistantReplyForDesignTools(ran) };
+            if (parsedCalls.length) {
+              return { ...done, content: "Couldn't apply that change — check the design is loaded." };
+            }
+            return { ...done, content: "Couldn't parse design tools from the response." };
+          }),
+        );
+
+        if (parsedCalls.length) {
+          const toolMsg: ChatMessage = {
+            id: crypto.randomUUID(),
+            role: "tool",
+            content: ran.length ? formatDesignToolRuns(ran) : "Design tools were parsed but did not run.",
+            timestamp: Date.now(),
+            toolName: [...new Set(parsedCalls.map((c) => c.name))].join(", "),
+          };
+          setMessages((prev) => {
+            const idx = prev.findIndex((m) => m.id === assistantId);
+            if (idx === -1) return [...prev, toolMsg];
+            return [...prev.slice(0, idx), toolMsg, ...prev.slice(idx)];
+          });
+        } else if (/design_[a-z_]+/i.test(text)) {
+          console.warn("[Chat] assistant emitted design tool JSON but host parsed 0 calls", {
+            text: text.slice(0, 240),
+          });
+        }
         setLlmReady(true);
       } catch (err: any) {
         if (err?.name === "AbortError" || String(err?.message || "").includes("aborted")) {
@@ -403,7 +411,7 @@ export function useChatEngine(namespace = "opend") {
         inputRef.current?.focus();
       }
     },
-    [input, attachments, isGenerating, messages, sessionId, buildApiMessages, collectTools, runWithTools, runStreaming],
+    [input, attachments, isGenerating, messages, sessionId, buildApiMessages, runStreaming],
   );
 
   const handleCancel = useCallback(() => {
@@ -492,6 +500,8 @@ export function useChatEngine(namespace = "opend") {
     fileInputRef,
     composerRef,
     extraToolsRef,
+    designContextRef,
+    runDesignToolsRef,
     promptHistory,
     historyIndex,
     navigateHistory,

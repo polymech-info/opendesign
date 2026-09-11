@@ -16,6 +16,9 @@
     "dev:client": "rspack dev --mode development",
     "build": "node scripts/build.mjs",
     "start": "node dist/cli.js",
+    "test:design": "tsx tests/design/test-design-dsl.ts",
+    "test:design:llm": "tsx tests/design/test-design-llm.ts",
+    "test:design:llm:require": "tsx tests/design/test-design-llm.ts --require-live",
     "prepublishOnly": "node scripts/build.mjs"
   },
   "devDependencies": {

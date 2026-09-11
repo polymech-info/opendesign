@@ -1,6 +1,7 @@
 import { createContext } from "preact";
 import { useContext } from "preact/hooks";
 import type { Design, Template, Page } from "./types";
+import type { DesignDocument } from "../design/types";
 import type * as fabric from "fabric";
 import type { LayerItem } from "./hooks/use-canvas";
 import type { IconPick } from "./lib/iconify-icons";
@@ -71,7 +72,9 @@ export interface EditorContextValue {
   exportPNG: () => void;
   getCanvasJSON: () => string;
   getCanvasJSONForPage: (pageId: string) => string;
+  applyDesignDocument: (doc: DesignDocument) => Promise<void>;
   loadTemplate: (template: Template) => void;
+  scheduleSave: () => void;
   layersEpoch: number;
   getLayers: () => LayerItem[];
   selectLayer: (id: string) => void;

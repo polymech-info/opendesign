@@ -7,6 +7,8 @@
 // originX/originY are explicit: Fabric 6 defaults to center, which would
 // shift every left/top from the seed JSON.
 
+import { bundledFeatureCardsTemplate } from "../design/example.js";
+
 export interface SeedTemplate {
   id: string;
   name: string;
@@ -20,6 +22,7 @@ export interface SeedTemplate {
 const leftTop = { originX: "left", originY: "top" } as const;
 
 export const SEED_TEMPLATES: SeedTemplate[] = [
+  bundledFeatureCardsTemplate(),
   {
     id: "quote-card",
     name: "Quote Card",

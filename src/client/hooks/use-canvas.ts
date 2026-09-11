@@ -51,6 +51,9 @@ import { createShapeObject, type ShapeKind } from "../lib/shapes";
 import { api } from "../api";
 import type { LibraryElement } from "../types";
 import { isBgImage, lockBackgroundImage } from "../lib/background-image";
+import { attachDesignDocument, projectToFabricJSON } from "../../design/project";
+import { getActiveDocument } from "../../design/tools";
+import type { DesignDocument } from "../../design/types";
 
 const MAX_HISTORY = 50;
 const NUDGE_STEP = 1;
@@ -982,14 +985,35 @@ export function useCanvasState() {
   const getCanvasJSON = useCallback(() => {
     const canvas = getActiveCanvas();
     if (!canvas) return "{}";
-    return JSON.stringify(canvas.toJSON([...FABRIC_EXTRA_PROPS]));
+    return attachDesignDocument(JSON.stringify(canvas.toJSON([...FABRIC_EXTRA_PROPS])), getActiveDocument());
   }, [getActiveCanvas]);
 
   const getCanvasJSONForPage = useCallback((pageId: string) => {
     const canvas = canvasMapRef.current.get(pageId);
     if (!canvas) return "{}";
-    return JSON.stringify(canvas.toJSON([...FABRIC_EXTRA_PROPS]));
+    return attachDesignDocument(JSON.stringify(canvas.toJSON([...FABRIC_EXTRA_PROPS])), getActiveDocument());
   }, []);
+
+  const applyDesignDocument = useCallback(
+    async (doc: DesignDocument) => {
+      const canvas = getActiveCanvas();
+      const pageId = activeCanvasIdRef.current;
+      if (!canvas || !pageId) return;
+      isRestoringRef.current.add(pageId);
+      try {
+        await loadFabricJSON(canvas, projectToFabricJSON(doc));
+        canvas.discardActiveObject();
+        canvas.requestRenderAll();
+        setSelectedObject(null);
+        setSelectionEpoch((n) => n + 1);
+        setLayersEpoch((n) => n + 1);
+      } finally {
+        isRestoringRef.current.delete(pageId);
+      }
+      saveHistory(pageId);
+    },
+    [getActiveCanvas, saveHistory],
+  );
 
   const loadTemplate = useCallback(
     (template: Template) => {
@@ -1246,6 +1270,7 @@ export function useCanvasState() {
     exportPNG,
     getCanvasJSON,
     getCanvasJSONForPage,
+    applyDesignDocument,
     loadTemplate,
     layersEpoch,
     getLayers,
