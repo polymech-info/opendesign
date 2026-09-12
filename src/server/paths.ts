@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { seedProjectGuides } from "./project-guides.js";
 
 export const PROJECT_DIRNAME = ".OpenDesign";
 
@@ -53,6 +54,7 @@ const SUBDIRS = [
   "uploads/backgrounds",
   "uploads/icons",
   "uploads/screenshots",
+  "uploads/thumbs",
   "journal",
 ];
 
@@ -64,6 +66,7 @@ export function ensureRootLayout(root: string) {
 export function ensureLayouts(roots: Roots) {
   ensureRootLayout(roots.global);
   if (!sameRoots(roots)) ensureRootLayout(roots.project);
+  seedProjectGuides(roots.project);
 }
 
 export function layerRoot(roots: Roots, layer: Layer) {

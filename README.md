@@ -30,16 +30,40 @@ npx @polymech/opendesign
 
 Original: [clawnify/OpenDesign](https://github.com/clawnify/OpenDesign). This fork is a local CLI — no Cloudflare Workers, no Wrangler, no cloud storage.
 
-## What we changed
+## Features
+
+### Canvas editor
+
+- Multi-page stills, canvas-size presets, undo/redo, snap guides, and layers
+- Text, extra shapes, Tabler icons, Iconify search, uploads, and reusable elements
+- Glass, gradients, opacity, patterns, shadows, and page color / gradient / image backgrounds
+- Named groups, align to the first selected object, front/back, copy-paste objects and styles
+- Versions, templates, and merged project + global libraries (union; project wins on the same name)
+
+### Images
+
+- Paste from the clipboard (`Ctrl+V`)
+- Crop a placed photo without stretching it: **Shift-drag** to pan the crop, **Shift-drag a corner** to zoom inside the frame, **Shift-drag a side handle** to clip. Inspector sliders set zoom and origin; **Reset** restores the full image
+- Lock an image as the page background
+
+### Export
+
+- **Copy** on the top toolbar writes the current page as a PNG to the system clipboard
+- **PNG** downloads the same 2× render; Shift-click writes `.OpenDesign/designs/title_n.png`
+- **JSON** downloads the multi-page canvas document
+- Headless `pm-opendesign export` uses Chrome/Edge on the same canvas (store screenshots)
+
+### Agents
+
+- Design DSL — stable IDs, roles, widgets, styles, content, and geometry in a compact text format
+- Chat in the editor (Tanit host tools) plus `pm-opendesign prompt` / `query` for batch edits
+- MCP for Cursor / Claude Desktop (`pm-opendesign mcp` or `POST /api/mcp`)
+
+### Local-first
 
 - **`pm-opendesign`** — one process serves the UI and API, then opens the browser
-- **Folders, not cloud** — JSON + files on disk. No D1, R2, or Wrangler
-- **Merged libraries** — project + global uploads, icons, templates, and elements all show up together (union; project wins on the same name)
-- **Published `dist` only** — one client bundle, one CLI bundle, plus Tabler filled icons
-- **Editor** — named groups, glass, snap guides, Iconify search, extra shapes / gradients / opacity, copy-paste
-- **Design DSL** — stable IDs, roles, widgets, styles, content, and geometry in a compact text format
-- **Agent editing** — query or update many matching elements in one operation from chat or the CLI
-- **Headless PNG** — Chrome/Edge renders the same canvas the editor uses (for store screenshots)
+- JSON and files on disk. No D1, R2, or Wrangler
+- Published `dist` only — one client bundle, one CLI bundle, plus Tabler filled icons
 
 ## Design DSL and mass editing
 
@@ -108,6 +132,15 @@ batch editing matter.
 
 New designs and uploads go to the project folder. Iconify downloads go to the global icon library.
 
+Chat, `pm-opendesign prompt`, and MCP `prompt_design` inject two project files into the system brief (created on first run if missing):
+
+| | |
+|---|---|
+| `.OpenDesign/style_guide.md` | Visual rules (type, glass, 1920×1080 stills) |
+| `.OpenDesign/SKILL.md` | What this cwd’s designs are and how to edit them |
+
+Edit those files per project. The running server’s cwd is the folder that is read (`GET /api/guides`).
+
 ## CLI
 
 ```
@@ -117,6 +150,7 @@ pm-opendesign export [id|name] [-o out.png] [--page 1] [--scale 2]
 pm-opendesign export [id|name] --format dsl [-o design.md] [--page 1]
 pm-opendesign query [id|name] "type=txt role=title"
 pm-opendesign prompt [id|name] "Move the title down 20px"
+pm-opendesign mcp
 ```
 
 ### Export and query Design DSL
@@ -148,8 +182,8 @@ Use `-q`/`--query` instead of a trailing expression when convenient.
 
 ### Prompt from the CLI
 
-`prompt` runs the same Design DSL tool loop as editor chat, saves the selected
-page, and exits without opening a browser:
+`prompt` still uses the CLI emit-JSON Design DSL loop (not the editor chat
+host provider). It saves the selected page and exits without opening a browser:
 
 ```bash
 pm-opendesign ls
@@ -179,6 +213,102 @@ open in the editor, the UI polls `/api/designs/{id}/revision` and reloads the
 canvas (banner: **Reloaded from CLI**).
 Set `OPEND_TANIT_CLI`, `OPEND_LLM_URL`, `OPEND_LLM_KEY`, or
 `OPEND_LLM_PRESET` the same way as editor chat.
+
+## MCP
+
+OpenDesign speaks MCP JSON-RPC 2.0 (no SDK) so Cursor, Claude Desktop, or any
+MCP client can create and edit designs on disk. Direct Design DSL tools plus
+`prompt_design`, which is the same Tanit agent loop as `pm-opendesign prompt`.
+Mutating calls save immediately and stamp `updated_by=cli` so an open editor
+reloads. `prompt_design` needs `tanit-cli --serve` (the editor starts it, or set
+`OPEND_LLM_URL` / `OPEND_TANIT_CLI`).
+
+Editor chat must not own a second tool loop (no JSON scrape, no client `tools[]`
+executor). Tanit `--serve` is the agent; host `IAgentToolProvider` is how
+`design_*` attach. MCP here is for Cursor / other clients, not the editor chat
+path. Contract: [docs/llm/llm-server.md](../../docs/llm/llm-server.md).
+
+### Cursor — stdio (recommended)
+
+`cwd` must be the folder that contains (or will contain) `.OpenDesign/`.
+
+Published package:
+
+```json
+{
+  "mcpServers": {
+    "opendesign": {
+      "command": "npx",
+      "args": ["-y", "@polymech/opendesign", "mcp"],
+      "cwd": "C:/path/to/your-project"
+    }
+  }
+}
+```
+
+This repo (dev):
+
+```json
+{
+  "mcpServers": {
+    "opendesign": {
+      "command": "npx",
+      "args": ["tsx", "src/cli.ts", "mcp"],
+      "cwd": "C:/path/to/your-project",
+      "env": {
+        "OPEND_CWD": "C:/path/to/your-project"
+      }
+    }
+  }
+}
+```
+
+Run the `npx tsx …` variant from `infrastructure/OpenDesign`, or pass the
+absolute path to `src/cli.ts` in `args`. `OPEND_CWD` overrides the process
+working directory if you cannot set `cwd`.
+
+Put that block in `.cursor/mcp.json` (project) or Cursor Settings → MCP.
+
+### Cursor — HTTP (editor already running)
+
+Start the app (`pm-opendesign` or `npm run dev` in this repo), then **restart**
+it after pulling MCP changes — an old process has no `/api/mcp` (Cursor logs
+SSE 404). Streamable HTTP + SSE: `GET`/`POST` `/api/mcp` (also `/mcp`). Dev
+default is port **3727**.
+
+```json
+{
+  "mcpServers": {
+    "opendesign": {
+      "url": "http://127.0.0.1:3727/api/mcp"
+    }
+  }
+}
+```
+
+HTTP uses whatever project folder the running server was started in.
+
+### Tools
+
+| | |
+|---|---|
+| Catalog | `list_designs`, `get_design`, `list_templates` |
+| Create | `create_design` (`dsl` / `template` / blank), `add_page` |
+| Prompt | `prompt_design` — natural language, same loop as `pm-opendesign prompt` |
+| Change | `update_design`, `design_query`, `design_get`, `design_create`, `design_update`, `design_delete`, `design_use_widget`, `design_copy_styles`, `design_insert_image`, `design_insert_asset`, `design_set_page_background`, `design_search_icons` |
+| Remove | `delete_design`, `delete_page` |
+| Export | `design_export` — writes `path` (`dsl` / `md` / `json` / `png`) and returns the absolute file |
+
+Pass `design` as an id or name on every edit tool. `page` is 1-based (default `1`).
+`design_search_icons` query is **one word** (`shield`, not `security shield`).
+
+```text
+create_design name="Launch" template=feature-cards
+prompt_design design="Launch" prompt="Translate all titles to Spanish"
+get_design design="Launch"
+design_update design="Launch" where="type=txt role=title" set={"text":"Hola"}
+design_export design="Launch" format=png path=exports/launch.png
+```
 
 ### Headless export
 

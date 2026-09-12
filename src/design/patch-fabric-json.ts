@@ -71,6 +71,10 @@ function applyProjectedStyle(obj: FabricObjectJSON, projected: FabricObjectJSON)
 }
 
 function applyProjectedFrame(obj: FabricObjectJSON, projected: FabricObjectJSON) {
+  obj.originX = "left";
+  obj.originY = "top";
+  obj.scaleX = 1;
+  obj.scaleY = 1;
   if (typeof projected.left === "number") obj.left = projected.left;
   if (typeof projected.top === "number") obj.top = projected.top;
   const type = String(obj.type ?? "").toLowerCase();
@@ -80,6 +84,8 @@ function applyProjectedFrame(obj: FabricObjectJSON, projected: FabricObjectJSON)
   if (type === "rect" && typeof projected.height === "number") obj.height = projected.height;
 }
 
+const CANVAS_KEEP_IDS = new Set(["canvas.bg", "canvas.photo"]);
+
 function collectIds(objects: unknown[]): Set<string> {
   const ids = new Set<string>();
   walkObjects(objects, null, (rec) => {
@@ -87,6 +93,35 @@ function collectIds(objects: unknown[]): Set<string> {
     if (id) ids.add(id);
   });
   return ids;
+}
+
+function irKeepIds(doc: DesignDocument): Set<string> {
+  const keep = new Set(CANVAS_KEEP_IDS);
+  for (const node of doc.nodes) keep.add(node.id);
+  return keep;
+}
+
+function filterDeletedObjects(objects: FabricObjectJSON[], keep: Set<string>): FabricObjectJSON[] {
+  const next: FabricObjectJSON[] = [];
+  for (const obj of objects) {
+    if (isFabricGroup(obj) && Array.isArray(obj.objects)) {
+      obj.objects = filterDeletedObjects(obj.objects as FabricObjectJSON[], keep);
+      const id = typeof obj._id === "string" ? obj._id : "";
+      const useId = id.startsWith("group.") ? id.slice("group.".length) : "";
+      if (useId && !keep.has(useId) && obj.objects.length === 0) continue;
+      if (!id && obj.objects.length === 0) continue;
+      next.push(obj);
+      continue;
+    }
+    const id = typeof obj._id === "string" ? obj._id.trim() : "";
+    if (!id || keep.has(id)) next.push(obj);
+  }
+  return next;
+}
+
+/** Drop Fabric objects whose IR nodes were deleted (design_delete). */
+export function removeDeletedFabricNodes(canvas: FabricCanvasJSON, doc: DesignDocument) {
+  canvas.objects = filterDeletedObjects(canvas.objects ?? [], irKeepIds(doc));
 }
 
 function syncGroupedUseFrames(canvas: FabricCanvasJSON, doc: DesignDocument) {
@@ -109,10 +144,43 @@ function syncGroupedUseFrames(canvas: FabricCanvasJSON, doc: DesignDocument) {
   });
 }
 
+function syncPageBackground(canvas: FabricCanvasJSON, doc: DesignDocument) {
+  const objects = canvas.objects ?? [];
+  const idx = objects.findIndex((obj) => obj._id === "canvas.photo");
+  const projected = projectNodeById(doc, "canvas.photo");
+  if (!projected) {
+    if (idx >= 0) objects.splice(idx, 1);
+    return;
+  }
+  if (idx >= 0) {
+    const current = objects[idx]!;
+    applyProjectedStyle(current, projected);
+    if (typeof projected.src === "string") current.src = projected.src;
+    current._isBgImage = true;
+    return;
+  }
+  let insertAt = objects.findIndex((obj) => obj._id === "canvas.bg") + 1;
+  if (insertAt < 1) insertAt = 0;
+  objects.splice(insertAt, 0, projected);
+}
+
+function insertTopNode(canvas: FabricCanvasJSON, doc: DesignDocument, projected: FabricObjectJSON, nodeId: string) {
+  const objects = canvas.objects ?? [];
+  const irIds = doc.nodes.filter((n) => !n.parentId).map((n) => n.id);
+  const irIdx = irIds.indexOf(nodeId);
+  let insertAt = objects.findIndex((o) => o._id === "canvas.bg") + 1;
+  if (insertAt < 1) insertAt = 0;
+  if (objects[insertAt]?._id === "canvas.photo") insertAt += 1;
+  for (let i = 0; i < irIdx; i++) {
+    const fabricIdx = objects.findIndex((o) => o._id === irIds[i]);
+    if (fabricIdx >= 0) insertAt = fabricIdx + 1;
+  }
+  objects.splice(insertAt, 0, projected);
+}
+
 function appendMissingNodes(canvas: FabricCanvasJSON, doc: DesignDocument) {
   const existing = collectIds(canvas.objects ?? []);
   const missingByUse = new Map<string, FabricObjectJSON[]>();
-  const missingTop: FabricObjectJSON[] = [];
 
   for (const node of doc.nodes) {
     if (existing.has(node.id)) continue;
@@ -123,7 +191,8 @@ function appendMissingNodes(canvas: FabricCanvasJSON, doc: DesignDocument) {
       list.push(projected);
       missingByUse.set(node.parentId, list);
     } else {
-      missingTop.push(projected);
+      insertTopNode(canvas, doc, projected, node.id);
+      existing.add(node.id);
     }
   }
 
@@ -150,7 +219,6 @@ function appendMissingNodes(canvas: FabricCanvasJSON, doc: DesignDocument) {
       })),
     });
   }
-  canvas.objects.push(...missingTop);
 }
 
 /**
@@ -164,6 +232,9 @@ export function patchFabricJsonFromDocument(
 ): string {
   const canvas = JSON.parse(existing) as FabricCanvasJSON;
   if (!Array.isArray(canvas.objects)) canvas.objects = [];
+
+  removeDeletedFabricNodes(canvas, doc);
+  syncPageBackground(canvas, doc);
 
   walkObjects(canvas.objects, null, (obj, parent) => {
     const id = typeof obj._id === "string" ? obj._id : "";

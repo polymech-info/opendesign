@@ -52,11 +52,14 @@ function applyNodeFrame(obj: fabric.FabricObject, node: DesignNode, projected: R
     originY: "top",
     left: node.bounds.x,
     top: node.bounds.y,
+    scaleX: 1,
+    scaleY: 1,
   });
+  const isRect = obj instanceof fabric.Rect || String(obj.type || "").toLowerCase() === "rect";
   if (node.type === "txt" && (obj instanceof fabric.Textbox || obj instanceof fabric.IText)) {
     const text = typeof projected?.text === "string" ? projected.text : (node.text ?? "");
     obj.set({ width: node.bounds.w, text });
-  } else if (node.type === "shape" && obj instanceof fabric.Rect) {
+  } else if (node.type === "shape" && isRect) {
     obj.set({ width: node.bounds.w, height: node.bounds.h });
     const radius = Number(node.props.radius ?? projected?.rx ?? 0);
     if (Number.isFinite(radius)) applyRectCornerRadius(obj, radius);

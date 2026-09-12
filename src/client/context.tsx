@@ -70,13 +70,17 @@ export interface EditorContextValue {
   zoomIn: () => void;
   zoomOut: () => void;
   captureCanvasScreenshot: () => string | null;
-  exportPNG: () => void;
+  exportPNG: (opts?: { toProject?: boolean; name?: string }) => Promise<{ path: string; filename: string; relative: string } | null>;
+  copyDesignToClipboard: () => Promise<boolean>;
   getCanvasJSON: () => string;
   getCanvasJSONForPage: (pageId: string) => string;
   applyDesignDocument: (doc: DesignDocument) => Promise<void>;
+  applyPatchedDocument: (doc: DesignDocument) => Promise<boolean>;
   patchDesignOnCanvas: (doc: DesignDocument, plan: import("../design/apply-plan").CanvasPatchPlan) => Promise<boolean>;
   loadTemplate: (template: Template) => void;
   scheduleSave: () => void;
+  refreshFromDisk: () => Promise<void>;
+  acceptHostRevision: (updatedAt?: string, canvasJson?: string) => void;
   layersEpoch: number;
   getLayers: () => LayerItem[];
   selectLayer: (id: string) => void;
@@ -96,13 +100,16 @@ export interface EditorContextValue {
   loadDesign: (id: string) => Promise<void>;
   saveDesign: (opts?: { snapshot?: boolean }) => Promise<void>;
   deleteDesign: (id: string) => Promise<void>;
+  duplicateDesign: (id: string) => Promise<string | undefined>;
   renameDesign: (id: string, name: string) => Promise<void>;
   saving: boolean;
   diskReloadEpoch: number;
   diskNotice: string | null;
+  flashNotice: (message: string) => void;
   versions: DesignVersion[];
   activeVersionRev: number | null;
   saveVersion: (description: string) => Promise<{ version: DesignVersion; created: boolean } | null>;
+  restoreVersion: (rev: number) => Promise<void>;
   deleteVersion: (rev: number) => Promise<void>;
   switchVersion: (rev: number | null) => Promise<void>;
 

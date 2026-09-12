@@ -5,7 +5,23 @@ import { abortCanvasTransform } from "./element-group";
 import { isIconObject } from "./tabler-icons";
 
 const CORNERS = new Set(["tl", "tr", "bl", "br"]);
+const MIDS = new Set(["ml", "mr", "mt", "mb"]);
 const MIN_CROP = 24;
+
+export type ImageClipHandle = "ml" | "mr" | "mt" | "mb";
+
+export type ImageClipStart = {
+  cropX: number;
+  cropY: number;
+  width: number;
+  height: number;
+  scaleX: number;
+  scaleY: number;
+  angle?: number;
+  flipX?: boolean;
+  flipY?: boolean;
+  pin?: { x: number; y: number };
+};
 
 export function isCroppableImage(obj: fabric.FabricObject | null | undefined): obj is fabric.FabricImage {
   return obj instanceof fabric.FabricImage && !isBgImage(obj) && !isIconObject(obj);
@@ -16,17 +32,21 @@ type SizedImage = fabric.FabricImage & { _sourceW?: number; _sourceH?: number };
 export function imageSourceSize(img: fabric.FabricImage) {
   const sized = img as SizedImage;
   const el = img.getElement() as { naturalWidth?: number; naturalHeight?: number; width?: number; height?: number } | null;
-  const nw = el?.naturalWidth || el?.width || 0;
-  const nh = el?.naturalHeight || el?.height || 0;
+  const nw = Number(el?.naturalWidth || 0);
+  const nh = Number(el?.naturalHeight || 0);
   if (nw > 0 && nh > 0) {
     sized._sourceW = nw;
     sized._sourceH = nh;
     return { w: nw, h: nh };
   }
-  const w = Math.max(1, sized._sourceW || (img.cropX || 0) + (img.width || 1));
-  const h = Math.max(1, sized._sourceH || (img.cropY || 0) + (img.height || 1));
-  if (!sized._sourceW) sized._sourceW = w;
-  if (!sized._sourceH) sized._sourceH = h;
+  // Prefer natural pixels only. Layout `el.width` is often a CSS/default size
+  // and must not be cached as the bitmap — that offsets the crop frame.
+  const windowW = (img.cropX || 0) + (img.width || 1);
+  const windowH = (img.cropY || 0) + (img.height || 1);
+  const w = Math.max(1, sized._sourceW || 0, windowW);
+  const h = Math.max(1, sized._sourceH || 0, windowH);
+  sized._sourceW = w;
+  sized._sourceH = h;
   return { w, h };
 }
 
@@ -135,6 +155,82 @@ export function zoomImageCrop(
   applyCropWindow(img, cropX, cropY, width, height);
 }
 
+function clipPinOrigin(handle: ImageClipHandle): {
+  originX: fabric.FabricObject["originX"];
+  originY: fabric.FabricObject["originY"];
+} {
+  if (handle === "ml") return { originX: "right", originY: "center" };
+  if (handle === "mr") return { originX: "left", originY: "center" };
+  if (handle === "mt") return { originX: "center", originY: "bottom" };
+  return { originX: "center", originY: "top" };
+}
+
+function sceneDeltaToSource(
+  sceneDx: number,
+  sceneDy: number,
+  start: ImageClipStart
+) {
+  const angle = ((start.angle || 0) * Math.PI) / 180;
+  const cos = Math.cos(-angle);
+  const sin = Math.sin(-angle);
+  let lx = sceneDx * cos - sceneDy * sin;
+  let ly = sceneDx * sin + sceneDy * cos;
+  if (start.flipX) lx = -lx;
+  if (start.flipY) ly = -ly;
+  return {
+    x: lx / (Math.abs(start.scaleX) || 1),
+    y: ly / (Math.abs(start.scaleY) || 1),
+  };
+}
+
+/** Shift + mid-handle: resize the crop window. Scale stays put (no stretch). */
+export function clipImageCrop(
+  img: fabric.FabricImage,
+  handle: ImageClipHandle,
+  sceneDx: number,
+  sceneDy: number,
+  start: ImageClipStart
+) {
+  const src = imageSourceSize(img);
+  const delta = sceneDeltaToSource(sceneDx, sceneDy, start);
+  const minW = Math.min(src.w, Math.max(MIN_CROP, src.w * 0.04));
+  const minH = Math.min(src.h, Math.max(MIN_CROP, src.h * 0.04));
+  let cropX = start.cropX;
+  let cropY = start.cropY;
+  let width = start.width;
+  let height = start.height;
+
+  if (handle === "mr") {
+    width = clamp(start.width + delta.x, minW, src.w - start.cropX);
+  } else if (handle === "ml") {
+    width = clamp(start.width - delta.x, minW, start.cropX + start.width);
+    cropX = start.cropX + start.width - width;
+  } else if (handle === "mb") {
+    height = clamp(start.height + delta.y, minH, src.h - start.cropY);
+  } else {
+    height = clamp(start.height - delta.y, minH, start.cropY + start.height);
+    cropY = start.cropY + start.height - height;
+  }
+
+  cropX = clamp(cropX, 0, Math.max(0, src.w - width));
+  cropY = clamp(cropY, 0, Math.max(0, src.h - height));
+
+  const pinOrigin = clipPinOrigin(handle);
+  const pin = start.pin ?? img.getPointByOrigin(pinOrigin.originX, pinOrigin.originY);
+  img.set({
+    cropX,
+    cropY,
+    width,
+    height,
+    scaleX: start.scaleX,
+    scaleY: start.scaleY,
+  });
+  img.setPositionByOrigin(new fabric.Point(pin.x, pin.y), pinOrigin.originX, pinOrigin.originY);
+  applyImageCornerRadius(img, readImageCornerRadius(img));
+  img.setCoords();
+  img.dirty = true;
+}
+
 export function readImageCrop(img: fabric.FabricImage) {
   const fit = maxCropWindow(img);
   const width = Math.max(1, img.width || 1);
@@ -189,6 +285,14 @@ type CropGesture =
       startDist: number;
       start: { cropX: number; cropY: number; width: number; height: number };
       locks: { moveX: boolean; moveY: boolean; scaleX: boolean; scaleY: boolean };
+    }
+  | {
+      mode: "clip";
+      img: fabric.FabricImage;
+      handle: ImageClipHandle;
+      startScene: fabric.Point;
+      start: ImageClipStart;
+      locks: { moveX: boolean; moveY: boolean; scaleX: boolean; scaleY: boolean };
     };
 
 function oppositeCoord(img: fabric.FabricImage, handle: "tl" | "tr" | "bl" | "br") {
@@ -207,7 +311,7 @@ export function installImageCropGestures(canvas: fabric.Canvas, onCommit: () => 
     const { img, locks } = gesture;
     img.lockMovementX = locks.moveX;
     img.lockMovementY = locks.moveY;
-    if (gesture.mode === "zoom") {
+    if (gesture.mode === "zoom" || gesture.mode === "clip") {
       img.lockScalingX = gesture.locks.scaleX;
       img.lockScalingY = gesture.locks.scaleY;
     }
@@ -254,6 +358,39 @@ export function installImageCropGestures(canvas: fabric.Canvas, onCommit: () => 
       img.lockMovementY = true;
       img.lockScalingX = true;
       img.lockScalingY = true;
+    } else if (hit && MIDS.has(hit.key)) {
+      const handle = hit.key as ImageClipHandle;
+      img.setCoords();
+      const pinOrigin = clipPinOrigin(handle);
+      const pin = img.getPointByOrigin(pinOrigin.originX, pinOrigin.originY);
+      gesture = {
+        mode: "clip",
+        img,
+        handle,
+        startScene: scene,
+        start: {
+          cropX: img.cropX || 0,
+          cropY: img.cropY || 0,
+          width: img.width || 1,
+          height: img.height || 1,
+          scaleX: img.scaleX || 1,
+          scaleY: img.scaleY || 1,
+          angle: img.angle || 0,
+          flipX: !!img.flipX,
+          flipY: !!img.flipY,
+          pin: { x: pin.x, y: pin.y },
+        },
+        locks: {
+          moveX: !!img.lockMovementX,
+          moveY: !!img.lockMovementY,
+          scaleX: !!img.lockScalingX,
+          scaleY: !!img.lockScalingY,
+        },
+      };
+      img.lockMovementX = true;
+      img.lockMovementY = true;
+      img.lockScalingX = true;
+      img.lockScalingY = true;
     } else if (!hit) {
       gesture = {
         mode: "pan",
@@ -276,6 +413,14 @@ export function installImageCropGestures(canvas: fabric.Canvas, onCommit: () => 
     if (gesture.mode === "pan") {
       panImageCrop(gesture.img, scene.x - gesture.last.x, scene.y - gesture.last.y);
       gesture.last = scene;
+    } else if (gesture.mode === "clip") {
+      clipImageCrop(
+        gesture.img,
+        gesture.handle,
+        scene.x - gesture.startScene.x,
+        scene.y - gesture.startScene.y,
+        gesture.start
+      );
     } else {
       const dist = Math.hypot(scene.x - gesture.origin.x, scene.y - gesture.origin.y);
       zoomImageCrop(gesture.img, dist / gesture.startDist, gesture.handle, gesture.start);

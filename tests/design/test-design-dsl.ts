@@ -25,11 +25,18 @@ import {
   isDesignToolOnlyReply,
   bundledFeatureCardsTemplate,
   designChatBrief,
+  understandPicturePaths,
   attachDesignDocument,
   documentFromCanvasJson,
   pruneDocumentToCanvas,
   projectToFabricJSON,
+  writeCliCanvasJson,
   validateFabricProjection,
+  hostToolRunNeedsSceneRefresh,
+  latestHostRevisionAfter,
+  replayHostDesignRuns,
+  shouldReloadInsteadOfSave,
+  takeFreshHostSceneRuns,
   createDesignTools,
   designToolNames,
   dispatchDesignTool,
@@ -42,6 +49,7 @@ import {
   setActiveDocument,
   stripDesignToolJsonFromText,
   assistantDisplayText,
+  applyUploadFromToolResult,
   autoApplyUploadPath,
   isCanvasImageUploadKey,
   parseEmittedMediaCalls,
@@ -55,6 +63,12 @@ import {
   toolFollowUpFromRuns,
 } from "../../src/design/index.ts";
 import { appendStreamDelta, dedupeRepeatedContent } from "../../src/client/modules/ai/streamText.ts";
+import {
+  applySseFrame,
+  consumeSseBuffer,
+  tanitCompletionBody,
+  unwrapTanitToolCall,
+} from "../../src/client/modules/ai/streamTanit.ts";
 import { formatChatTranscript, formatMessageCopyText } from "../../src/client/modules/ai/chatTranscript.ts";
 
 const stats = { passed: 0, failed: 0 };
@@ -304,6 +318,21 @@ await suite("parse-emitted", () => {
     { canFollowShot: false, canFollowUnderstand: true },
   );
   check(understandFollow?.kind === "understand" && understandFollow.content.includes("design_*"), "understand follow-up asks for design_*");
+  check(
+    toolFollowUpFromRuns(
+      [{ name: "image_understand", result: { ok: true, answer: "a cat" } }],
+      { canFollowShot: true, canFollowUnderstand: false },
+    ) === null,
+    "describe-only understand does not follow up",
+  );
+  const longAnswer = `${"A wide landscape photo with mountains and a lake. ".repeat(12)}End.`;
+  check(
+    assistantDisplayText('{"name":"image_understand","arguments":{}}', [
+      { name: "image_understand", result: { ok: true, results: [{ answer: longAnswer }] } },
+    ]).includes("End."),
+    "understand answer is shown in full",
+  );
+  check(assistantDisplayText('{"tool_calls":[]}', []).trim() === "", "empty tool_calls is not shown");
   rememberScreenshotPath("uploads/1789171201377_phj16w.jpg");
   check(
     resolveUnderstandPaths(["uploads/178917120137_phj16w.jpg"])[0] === "uploads/1789171201377_phj16w.jpg",
@@ -539,10 +568,23 @@ await suite("chat-brief-host-tools", async () => {
   check(brief.includes("design_search_icons"), "brief lists icon search");
   check(brief.includes("design_screenshot"), "brief lists screenshot");
   check(brief.includes("image_understand"), "brief lists image_understand");
-  check(/last resort/i.test(brief), "screenshot marked last resort");
+  check(brief.includes("PICTURES:"), "brief has PICTURES block");
+  check(/design_set_page_background/i.test(brief), "brief routes page bg through design_set_page_background");
+  check(/full-page/i.test(brief), "brief forbids full-page shape backgrounds");
   check(brief.includes("SELECTION: feature.search.title"), "brief carries selection");
+  check(brief.includes("Never say there is no UI"), "brief forbids disconnected-UI reply");
+  check(brief.includes("answer from SELECTION"), "brief answers selection from SELECTION");
   check(brief.includes("CANVAS pixels"), "brief warns x/y are canvas, not slot locals");
   check(brief.includes("not workspace files"), "tells agent not to edit workspace files");
+  check(brief.includes("native tools"), "brief says design tools are native");
+  check(!brief.includes("emit JSON below"), "brief does not ask the model to emit JSON");
+  const guided = designChatBrief(doc, {
+    guides: { styleGuide: "Glass cards use #0F172ACC.", skill: "Store Chat is 1920x1080." },
+  });
+  check(guided.includes("STYLE_GUIDE"), "brief injects style_guide.md");
+  check(guided.includes("Glass cards use #0F172ACC."), "brief carries style guide body");
+  check(guided.includes("SKILL"), "brief injects SKILL.md");
+  check(guided.includes("Store Chat is 1920x1080."), "brief carries skill body");
 
   const emitted =
     '{"name":"design_update","arguments":{"where":"id=feature.search.title","set":{"text":"Search files."}}}{"name":"design_update","arguments":{"where":"id=feature.search.title","set":{"text":"Search files."}}}';
@@ -551,7 +593,7 @@ await suite("chat-brief-host-tools", async () => {
   check(doc.nodes.find((n) => n.id === "feature.search.title")?.text === "Search files.", "title patched from streamed JSON");
   const fabric = JSON.parse(projectToFabricJSON(doc)) as { objects: Array<{ _id?: string; text?: string }> };
   check(fabric.objects.find((o) => o._id === "feature.search.title")?.text === "Search files.", "re-project shows Search files.");
-  console.log("ok: brief + host-run streamed tool_calls");
+  console.log("ok: brief + native tools (CLI emit path still parses JSON)");
 });
 
 await suite("icon-search", async () => {
@@ -669,6 +711,16 @@ await suite("uploads-and-backgrounds", async () => {
     fabric.objects.some((o) => o._id === "canvas.photo" && o._isBgImage && o.src?.includes("hero-v1")),
     "canvas.photo projected",
   );
+  const existingNoPhoto = projectToFabricJSON(buildFeatureCardsDocument());
+  const persistedBg = JSON.parse(writeCliCanvasJson(existingNoPhoto, doc)) as {
+    objects: Array<{ _id?: string; src?: string; _isBgImage?: boolean }>;
+    _designDsl?: string;
+  };
+  check(
+    persistedBg.objects.some((o) => o._id === "canvas.photo" && o._isBgImage && o.src?.includes("hero-v1")),
+    "cli persist inserts canvas.photo when IR has a page background",
+  );
+  check(persistedBg._designDsl?.includes("background uploads/backgrounds/hero-v1.png") === true, "cli persist keeps background in DSL");
 
   const img = dispatchDesignTool("design_insert_image", {
     id: "hero.photo",
@@ -707,6 +759,36 @@ await suite("uploads-and-backgrounds", async () => {
     designChatBrief(replaceDoc, { selectionIds: ["hero.photo"] }).includes("hero.photo type=img src=uploads/"),
     "brief selection includes image src",
   );
+  const projectRoot = "C:/Users/zx/Desktop/pixlwiz/pixlwiz/infrastructure/OpenDesign/.OpenDesign";
+  const pictured = designChatBrief(replaceDoc, {
+    selectionIds: ["hero.photo"],
+    projectRoot,
+    attachments: [{ name: "clip.png", src: "uploads/clip.png" }],
+  });
+  check(pictured.includes("PICTURES"), "brief lists PICTURES");
+  check(pictured.includes(`${projectRoot}/uploads/hero-v3.png`), "brief lists selected image as absolute path");
+  check(
+    pictured.includes(`${projectRoot}/uploads/clip.png`) || pictured.includes(`${projectRoot}\\uploads\\clip.png`),
+    "brief lists chat attachment as absolute path",
+  );
+  check(/do not say you cannot see the picture/i.test(pictured), "brief tells agent to call image_understand");
+  check(!/info_lookup/i.test(pictured) || pictured.includes("Do not use info_lookup"), "brief forbids info_lookup for pictures");
+  const understandSelected = understandPicturePaths(replaceDoc, {
+    selectionIds: ["hero.photo"],
+    projectRoot,
+    attachments: [{ name: "clip.png", src: "uploads/clip.png" }],
+  });
+  check(
+    understandSelected.length === 1 && understandSelected[0]!.includes("uploads/hero-v3.png"),
+    "understand prefers the selected canvas image over chat attachments",
+  );
+  const understandAttached = understandPicturePaths(replaceDoc, {
+    projectRoot,
+    attachments: [{ name: "clip.png", src: "uploads/clip.png" }],
+  });
+  check(understandAttached.length === 1 && understandAttached[0]!.includes("uploads/clip.png"), "understand falls back to attachments");
+  const understandNone = understandPicturePaths(buildFeatureCardsDocument(), { projectRoot });
+  check(understandNone.length === 0, "understand does not guess among many canvas images");
   const abs =
     "C:/Users/zx/Desktop/pixlwiz/pixlwiz/infrastructure/OpenDesign/.OpenDesign/uploads/backgrounds/soft-blue-abstract-v1.png";
   check(
@@ -715,6 +797,19 @@ await suite("uploads-and-backgrounds", async () => {
   );
   const appliedAbs = autoApplyUploadPath(buildFeatureCardsDocument(), abs);
   check(appliedAbs?.tool === "design_set_page_background", "auto apply from absolute path");
+  const transformApply = applyUploadFromToolResult(
+    replaceDoc,
+    "image_transform",
+    {
+      ok: true,
+      results: [{ ok: true, output_path: `${projectRoot}/uploads/hero-v4.png` }],
+    },
+    { paths: [`${projectRoot}/uploads/hero-v3.png`] },
+  );
+  check(transformApply?.tool === "design_update", "transform result replaces the source img");
+  check(replaceDoc.nodes.find((n) => n.id === "hero.photo")?.src?.includes("hero-v4"), "source img src updated");
+  const srcHit = queryNodes(replaceDoc, { query: "id=hero.photo", fields: ["src"] });
+  check(String(srcHit[0]?.src ?? "").startsWith("uploads/"), "query src is an upload key, not /api/uploads/file");
   const mediaOnly = await applyEmittedDesignTools(
     '{"name":"image_create","arguments":{"output_path":"uploads/backgrounds/x.png","options":{"prompt":"x"}}}',
     buildFeatureCardsDocument(),
@@ -784,6 +879,22 @@ await suite("uploads-and-backgrounds", async () => {
     cards,
   ) as { ok?: boolean; created?: string[] };
   check(pane.ok && pane.created?.includes("cards.pane"), "create pane");
+  const aliasDoc = parseDsl("canvas main 800 600");
+  const aliased = dispatchDesignTool(
+    "design_create",
+    {
+      objects: [
+        { type: "rect", id: "card1", x: 40, y: 40, w: 200, h: 120, fill: "#FFFFFF" },
+        { type: "icon", id: "card1-icon", x: 56, y: 56, w: 32, h: 32, icon: "star" },
+        { type: "text", id: "card1-title", x: 56, y: 96, w: 160, h: 28, text: "Fast" },
+      ],
+    },
+    aliasDoc,
+  ) as { ok?: boolean; created?: string[] };
+  check(aliased.ok && aliased.created?.includes("card1"), "create accepts type=rect");
+  check(aliasDoc.nodes.find((n) => n.id === "card1")?.type === "shape", "rect aliases to shape");
+  check(aliasDoc.nodes.find((n) => n.id === "card1-icon")?.props.icon === "star", "create icon= lands on icon node");
+  check(aliasDoc.nodes.find((n) => n.id === "card1-title")?.type === "txt", "text aliases to txt");
   const paneNode = cards.nodes.find((n) => n.id === "cards.pane");
   check(paneNode?.props.fill === "#02061799" && paneNode?.props.glass === "true", "create keeps fill/glass");
   const light = buildFeatureCardsDocument();
@@ -824,6 +935,21 @@ await suite("uploads-and-backgrounds", async () => {
   const paneIdx = fabricPane.objects.findIndex((o) => o._id === "cards.pane");
   const chatBgIdx = fabricPane.objects.findIndex((o) => o._id === "feature.chat.bg");
   check(paneIdx >= 0 && chatBgIdx > paneIdx, "projected pane under feature.chat.bg");
+  const cover = dispatchDesignTool(
+    "design_create",
+    {
+      behind: true,
+      objects: [{ type: "shape", id: "page.bg.base", x: 0, y: 0, w: 1920, h: 1400, fill: "#F5F1EA" }],
+    },
+    cards,
+  ) as { ok?: boolean };
+  check(cover.ok === false, "rejects full-page shape as background");
+  check(!cards.nodes.some((n) => n.id === "page.bg.base"), "did not insert covering frame");
+  const existingFab = projectToFabricJSON(buildFeatureCardsDocument());
+  const patched = JSON.parse(writeCliCanvasJson(existingFab, cards)) as { objects: Array<{ _id?: string }> };
+  const patchPane = patched.objects.findIndex((o) => o._id === "cards.pane");
+  const patchChat = patched.objects.findIndex((o) => o._id === "feature.chat.bg");
+  check(patchPane >= 0 && patchChat > patchPane, "cli persist keeps behind:true under existing cards");
   const moved = dispatchDesignTool(
     "design_update",
     { patches: [{ id: "feature.chat.bg", set: { x: 200, y: 90, w: 400, h: 200 } }] },
@@ -1029,6 +1155,328 @@ await suite("stream-text-dedupe", () => {
   acc = appendStreamDelta(acc, "The canvas");
   check(acc === "The canvas", "appendStreamDelta skips duplicate full replay");
   console.log("ok: stream text dedupe");
+});
+
+await suite("stream-tanit-tools", () => {
+  const { frames, rest } = consumeSseBuffer(
+    'event: tanit.tool_call\ndata: {"type":"tool_call","name":"design_update","arguments":{"id":"c1","arguments":{"where":"id=hero.title","set":{"text":"Hola"}}}}\n\n' +
+      'data: {"id":"x","object":"chat.completion.chunk","choices":[{"delta":{"content":"Done."},"finish_reason":null}]}\n\n' +
+      'event: tanit.tool_result\ndata: {"type":"tool_result","name":"design_update","id":"c1","result":{"ok":true,"saved":true}}\n\npartial',
+  );
+  check(frames.length === 3 && rest === "partial", "sse frames + tail");
+  const call = unwrapTanitToolCall(JSON.parse(frames[0]!.data) as Record<string, unknown>);
+  check(call.name === "design_update" && call.id === "c1" && call.arguments.where === "id=hero.title", "unwrap tool_call args");
+  let state = { text: "", finishReason: null as string | null, toolRuns: [] as Array<{ name: string; result: unknown }> };
+  for (const frame of frames) state = applySseFrame(frame, state);
+  check(state.text === "Done.", "text delta still streams");
+  check(state.toolRuns.length === 1 && state.toolRuns[0]!.name === "design_update", "one tracked tool");
+  check((state.toolRuns[0]!.result as { saved?: boolean }).saved === true, "tool_result fills the run");
+  const body = tanitCompletionBody({
+    model: "quick",
+    messages: [{ role: "user", content: "what is this?" }],
+    selection: ["C:/proj/.OpenDesign/uploads/photo.png"],
+  });
+  check((body.tanit as { selection?: string[] })?.selection?.[0]?.endsWith("photo.png") === true, "request body carries tanit.selection");
+  check(!("tanit" in tanitCompletionBody({ model: "quick", messages: [] })), "omit tanit.selection when empty");
+  console.log("ok: tanit SSE tool tracking");
+});
+
+await suite("host-scene-apply", () => {
+  check(hostToolRunNeedsSceneRefresh("design_query", { ok: true, result: [] }) === false, "query does not refresh scene");
+  check(hostToolRunNeedsSceneRefresh("design_update", { ok: true, saved: true, changed: 3 }) === true, "saved update refreshes scene");
+  check(hostToolRunNeedsSceneRefresh("design_update", { pending: true }) === false, "pending update waits");
+  check(
+    shouldReloadInsteadOfSave({ updated_by: "cli", updated_at: "2026-09-12T17:37:03.956Z" }, "2026-09-12T17:36:09.448Z"),
+    "stale editor save must reload cli persist",
+  );
+  check(
+    shouldReloadInsteadOfSave({ updated_by: "cli", updated_at: "t1" }, "t1") === false,
+    "same revision can save",
+  );
+  check(
+    latestHostRevisionAfter([
+      { name: "design_update", result: { revision_after: "2026-09-12T18:00:29.400Z" } },
+      { name: "design_set_page_background", result: { revision_after: "2026-09-12T18:02:05.144Z" } },
+    ]) === "2026-09-12T18:02:05.144Z",
+    "newest host revision wins",
+  );
+  const cards = buildFeatureCardsDocument();
+  const existingFab = projectToFabricJSON(cards);
+  const seen = new Set<string>();
+  const fresh = takeFreshHostSceneRuns(
+    [
+      {
+        id: "c1",
+        name: "design_update",
+        arguments: { where: "type=shape", set: { fill: "#FF0000" } },
+        result: { ok: true, saved: true, changed: 3, touched: ["feature.chat.bg", "feature.files.bg"] },
+      },
+    ],
+    seen,
+  );
+  check(fresh.length === 1, "first saved update is fresh");
+  check(takeFreshHostSceneRuns(fresh, seen).length === 0, "same tool run is not applied twice");
+  const { plan, replayed } = replayHostDesignRuns(cards, fresh);
+  check(replayed === 1, "replays design_update onto local IR");
+  check(plan.mode === "patch" && (plan.styleNodeIds?.length ?? 0) >= 2, "shape fill patches in place");
+  check(cards.nodes.find((n) => n.id === "feature.chat.bg")?.props.fill === "#FF0000", "IR fill is red");
+  const patched = JSON.parse(writeCliCanvasJson(existingFab, cards)) as {
+    objects: Array<{ _id?: string; fill?: string; objects?: Array<{ _id?: string; fill?: string }> }>;
+    _designDsl?: string;
+  };
+  const chatBg = patched.objects.find((o) => o._id === "feature.chat.bg");
+  check(chatBg?.fill === "#FF0000", "cli persist writes red fill onto the shape");
+  check(patched._designDsl?.includes("feature.chat.bg.fill=#FF0000") === true, "saved DSL keeps red fill");
+
+  const scene = buildFeatureCardsDocument();
+  const sceneFab = projectToFabricJSON(scene);
+  const created = dispatchDesignTool(
+    "design_create",
+    {
+      objects: [{ type: "txt", id: "hello", x: 80, y: 80, w: 400, h: 60, text: "hello", fill: "#111827" }],
+    },
+    scene,
+  ) as { created?: string[] };
+  check(created.created?.includes("hello") === true, "creates hello text");
+  const withHello = JSON.parse(writeCliCanvasJson(sceneFab, scene)) as {
+    objects: Array<{ _id?: string; text?: string; objects?: Array<{ _id?: string }> }>;
+  };
+  const helloObj = withHello.objects.find((o) => o._id === "hello");
+  check(helloObj?.text === "hello", "persist appends hello onto the fabric tree");
+
+  const used = dispatchDesignTool(
+    "design_use_widget",
+    {
+      widget: "feature-group",
+      id: "feature.light",
+      x: 80,
+      y: 280,
+      bindings: { icon: "sparkles", title: "Feature highlight", caption: "Light glass card", body: "Body" },
+    },
+    scene,
+  ) as { created?: string[] };
+  check(used.created?.includes("feature.light") === true, "instantiates feature.light");
+  const withCard = JSON.parse(writeCliCanvasJson(JSON.stringify(withHello), scene)) as {
+    objects: Array<{ _id?: string; objects?: Array<{ _id?: string }> }>;
+  };
+  const collectIds = (rows: Array<{ _id?: string; objects?: Array<{ _id?: string }> }>, into: string[] = []) => {
+    for (const row of rows) {
+      if (row._id) into.push(row._id);
+      if (row.objects) collectIds(row.objects, into);
+    }
+    return into;
+  };
+  const cardIds = collectIds(withCard.objects);
+  check(cardIds.includes("feature.light.bg"), "persist appends the new card background");
+  check(cardIds.includes("feature.light.title"), "persist appends the new card title");
+
+  const removed = dispatchDesignTool("design_delete", { ids: ["hello"] }, scene) as { deleted?: string[] };
+  check(removed.deleted?.includes("hello") === true, "deletes hello from IR");
+  const afterDelete = JSON.parse(writeCliCanvasJson(JSON.stringify(withCard), scene)) as {
+    objects: Array<{ _id?: string; objects?: Array<{ _id?: string }> }>;
+  };
+  const afterIds = collectIds(afterDelete.objects);
+  check(!afterIds.includes("hello"), "persist removes hello from the fabric tree");
+  check(afterIds.includes("feature.light.bg"), "delete hello keeps the feature card");
+  console.log("ok: host scene apply");
+});
+
+await suite("standalone-coords", () => {
+  const doc = parseDsl(`canvas main 1080 1080
+theme tanit-light
+`);
+  dispatchDesignTool(
+    "design_create",
+    {
+      objects: [
+        { id: "dot.a", type: "shape", x: 100, y: 100, w: 100, h: 100, radius: 50, fill: "#ef4444" },
+        { id: "dot.b", type: "shape", x: 300, y: 100, w: 100, h: 100, radius: 50, fill: "#3b82f6" },
+      ],
+    },
+    doc,
+  );
+  const queried = dispatchDesignTool(
+    "design_query",
+    { query: "id^=dot.", fields: ["id", "width", "height", "fill"] },
+    doc,
+  ) as Array<{ id?: string; width?: number; height?: number; fill?: string }>;
+  check(queried.length === 2, "prefix query finds standalone shapes");
+  check(queried[0]?.width === 100 && queried[0]?.fill === "#ef4444", "query width/fill aliases work");
+
+  const scaled = dispatchDesignTool(
+    "design_update",
+    { where: "id^=dot.", transform: { scale: 2, origin: { x: 100, y: 100 } } },
+    doc,
+  ) as { ok?: boolean; changed?: number };
+  check(scaled.ok === true && (scaled.changed ?? 0) === 2, "transform.scale mutates the selection");
+  const a = doc.nodes.find((n) => n.id === "dot.a");
+  const b = doc.nodes.find((n) => n.id === "dot.b");
+  check(a?.bounds.w === 200 && a?.bounds.x === 100, "scale keeps origin node in place");
+  check(b?.bounds.x === 500 && b?.bounds.w === 200, "scale moves the other node from origin");
+  check(a?.props.radius === "100", "scale grows corner radius");
+
+  const dsl = serializeDsl(doc);
+  check(dsl.includes("dot.a.fill=#ef4444"), "standalone fill is serialized");
+  check(dsl.includes("dot.a.radius=100"), "standalone radius is serialized");
+  const roundtrip = parseDsl(dsl);
+  check(roundtrip.nodes.find((n) => n.id === "dot.a")?.props.fill === "#ef4444", "standalone fill survives DSL round-trip");
+  const persisted = JSON.parse(writeCliCanvasJson(projectToFabricJSON(parseDsl(`canvas main 1080 1080\n`)), roundtrip)) as {
+    objects: Array<{ _id?: string; fill?: string; width?: number; rx?: number }>;
+  };
+  const savedA = persisted.objects.find((o) => o._id === "dot.a");
+  check(savedA?.fill === "#ef4444" && savedA?.width === 200, "persist keeps standalone fill and size");
+
+  const fitted = dispatchDesignTool(
+    "design_update",
+    { where: "id^=dot.", layout: { type: "fit", area: { x: 40, y: 40, w: 400, h: 200 } } },
+    doc,
+  ) as { ok?: boolean; changed?: number };
+  check(fitted.ok === true && (fitted.changed ?? 0) >= 1, "layout fit scales the selection");
+  const boxRight = Math.max(
+    ...(doc.nodes.filter((n) => n.id.startsWith("dot.")).map((n) => n.bounds.x + n.bounds.w)),
+  );
+  const boxBottom = Math.max(
+    ...(doc.nodes.filter((n) => n.id.startsWith("dot.")).map((n) => n.bounds.y + n.bounds.h)),
+  );
+  check(boxRight <= 440.01 && boxBottom <= 240.01, "fit keeps the selection inside the area");
+  console.log("ok: standalone coords + scale/fit");
+});
+
+function bboxOf(nodes: Array<{ bounds: { x: number; y: number; w: number; h: number } }>) {
+  const x0 = Math.min(...nodes.map((n) => n.bounds.x));
+  const y0 = Math.min(...nodes.map((n) => n.bounds.y));
+  const x1 = Math.max(...nodes.map((n) => n.bounds.x + n.bounds.w));
+  const y1 = Math.max(...nodes.map((n) => n.bounds.y + n.bounds.h));
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2 };
+}
+
+await suite("center-four-squares", () => {
+  const doc = parseDsl(`canvas main 1080 1080
+theme tanit-light
+`);
+  dispatchDesignTool(
+    "design_create",
+    {
+      objects: [
+        { id: "sq.tl", type: "shape", x: 40, y: 40, w: 120, h: 120, fill: "#ef4444" },
+        { id: "sq.tr", type: "shape", x: 180, y: 40, w: 120, h: 120, fill: "#3b82f6" },
+        { id: "sq.bl", type: "shape", x: 40, y: 180, w: 120, h: 120, fill: "#22c55e" },
+        { id: "sq.br", type: "shape", x: 180, y: 180, w: 120, h: 120, fill: "#eab308" },
+      ],
+    },
+    doc,
+  );
+  const squares = () => doc.nodes.filter((n) => n.id.startsWith("sq."));
+  const before = bboxOf(squares());
+  check(before.w === 260 && before.h === 260, "four selected squares start as a 2×2");
+
+  const fitted = dispatchDesignTool(
+    "design_update",
+    { where: "id^=sq.", layout: { type: "fit", area: { x: 0, y: 0, w: 1080, h: 1080 } } },
+    doc,
+  ) as { ok?: boolean; changed?: number };
+  check(fitted.ok === true && (fitted.changed ?? 0) === 4, "fit moves all four selected squares");
+
+  const after = squares();
+  const box = bboxOf(after);
+  check(Math.abs(box.cx - 540) < 0.5 && Math.abs(box.cy - 540) < 0.5, "ungrouped 2×2 is centered on the 1:1 canvas");
+  check(Math.abs(box.w - 1080) < 0.5 && Math.abs(box.h - 1080) < 0.5, "ungrouped 2×2 fills the 1:1 canvas");
+  const tl = after.find((n) => n.id === "sq.tl")!;
+  const tr = after.find((n) => n.id === "sq.tr")!;
+  const bl = after.find((n) => n.id === "sq.bl")!;
+  const scale = tl.bounds.w / 120;
+  check(Math.abs(tr.bounds.x - tl.bounds.x - 140 * scale) < 0.5, "top row keeps the 2×2 spacing after fit");
+  check(Math.abs(bl.bounds.y - tl.bounds.y - 140 * scale) < 0.5, "left column keeps the 2×2 spacing after fit");
+  check(after.every((n) => Math.abs(n.bounds.w - tl.bounds.w) < 0.5), "all four squares stay the same size");
+
+  const fabric = JSON.parse(projectToFabricJSON(doc)) as {
+    objects: Array<{ _id?: string; left?: number; top?: number; width?: number; height?: number }>;
+  };
+  const fabTl = fabric.objects.find((o) => o._id === "sq.tl");
+  check(fabTl?.left === tl.bounds.x && fabTl?.width === tl.bounds.w, "projected frames match centered IR");
+  console.log("ok: four selected squares centered on 1:1 canvas");
+});
+
+await suite("center-four-grouped-squares", () => {
+  const doc = parseDsl(`canvas main 1080 1080
+theme tanit-light
+
+widget quad w=260 h=260
+  shape tl x=0 y=0 w=120 h=120
+  shape tr x=140 y=0 w=120 h=120
+  shape bl x=0 y=140 w=120 h=120
+  shape br x=140 y=140 w=120 h=120
+`);
+  dispatchDesignTool("design_use_widget", { widget: "quad", id: "quad.1", x: 40, y: 40 }, doc);
+  const inst = doc.nodes.find((n) => n.id === "quad.1")!;
+  const kids = () => doc.nodes.filter((n) => n.parentId === "quad.1");
+  const localBefore = kids().map((n) => ({
+    id: n.id,
+    x: n.bounds.x - inst.bounds.x,
+    y: n.bounds.y - inst.bounds.y,
+    w: n.bounds.w,
+    h: n.bounds.h,
+  }));
+  check(localBefore.length === 4, "grouped widget has four squares");
+
+  const fitted = dispatchDesignTool(
+    "design_update",
+    { where: "id=quad.1", layout: { type: "fit", area: { x: 0, y: 0, w: 1080, h: 1080 } } },
+    doc,
+  ) as { ok?: boolean; changed?: number };
+  check(fitted.ok === true && (fitted.changed ?? 0) >= 1, "fit the grouped quad");
+
+  const use = doc.nodes.find((n) => n.id === "quad.1")!;
+  const box = bboxOf([use, ...kids()]);
+  check(Math.abs(box.cx - 540) < 0.5 && Math.abs(box.cy - 540) < 0.5, "grouped 2×2 is centered on the 1:1 canvas");
+  check(Math.abs(use.bounds.x + use.bounds.w / 2 - 540) < 0.5, "use instance center is the canvas center");
+
+  const scale = use.bounds.w / 260;
+  for (const prev of localBefore) {
+    const child = kids().find((n) => n.id === prev.id)!;
+    check(Math.abs(child.bounds.x - use.bounds.x - prev.x * scale) < 0.5, `${prev.id} keeps grouped local x`);
+    check(Math.abs(child.bounds.y - use.bounds.y - prev.y * scale) < 0.5, `${prev.id} keeps grouped local y`);
+    check(Math.abs(child.bounds.w - prev.w * scale) < 0.5, `${prev.id} scales with the group`);
+  }
+
+  const groupedJson = (() => {
+    const flat = JSON.parse(projectToFabricJSON(doc)) as {
+      objects: Array<Record<string, unknown> & { _id?: string; left?: number; top?: number }>;
+    };
+    const byId = new Map(flat.objects.map((o) => [String(o._id ?? ""), o]));
+    const members = kids()
+      .map((n) => byId.get(n.id))
+      .filter((o): o is Record<string, unknown> & { _id?: string; left?: number; top?: number } => !!o);
+    return JSON.stringify({
+      ...flat,
+      objects: [
+        ...flat.objects.filter((o) => o._id === "canvas.bg" || o._id === "canvas.photo"),
+        {
+          type: "Group",
+          originX: "left",
+          originY: "top",
+          left: use.bounds.x,
+          top: use.bounds.y,
+          _id: "group.quad.1",
+          _isElementGroup: true,
+          objects: members.map((kid) => ({
+            ...kid,
+            left: Number(kid.left ?? 0) - use.bounds.x,
+            top: Number(kid.top ?? 0) - use.bounds.y,
+          })),
+        },
+      ],
+    });
+  })();
+  const saved = JSON.parse(writeCliCanvasJson(groupedJson, doc, { source: "agent" })) as {
+    objects: Array<{ _id?: string; left?: number; top?: number; objects?: Array<{ _id?: string; left?: number; top?: number }> }>;
+  };
+  const group = saved.objects.find((o) => o._id === "group.quad.1");
+  check(!!group, "persist keeps the four squares grouped");
+  check(Math.abs((group?.left ?? 0) - use.bounds.x) < 0.5, "persisted group sits at the centered use origin");
+  const localTl = group?.objects?.find((o) => o._id === "quad.1.tl");
+  check(Math.abs(localTl?.left ?? 1) < 0.5 && Math.abs(localTl?.top ?? 1) < 0.5, "grouped child keeps local frame after persist");
+  console.log("ok: four grouped squares centered on 1:1 canvas");
 });
 
 assert.equal(stats.failed, 0);

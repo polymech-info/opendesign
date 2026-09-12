@@ -18,12 +18,21 @@ import {
   readIconStrokeWidth,
 } from "./tabler-icons";
 
+export type CopiedShadow = {
+  color: string;
+  blur: number;
+  offsetX: number;
+  offsetY: number;
+  affectStroke: boolean;
+  nonScaling: boolean;
+};
+
 export type CopiedObjectStyle = {
-  fill?: string;
+  fill?: unknown;
   stroke?: string;
   strokeWidth?: number;
   opacity?: number;
-  shadow: { color: string; blur: number; offsetX: number; offsetY: number } | null;
+  shadow: CopiedShadow | null;
   rx?: number;
   ry?: number;
   cornerRadius?: number;
@@ -43,7 +52,7 @@ function isTextObject(obj: fabric.FabricObject) {
   return obj instanceof fabric.Textbox || obj instanceof fabric.IText;
 }
 
-function snapshotShadow(obj: fabric.FabricObject): CopiedObjectStyle["shadow"] {
+function snapshotShadow(obj: fabric.FabricObject): CopiedShadow | null {
   const raw = obj.shadow;
   if (!raw) return null;
   const shadow = typeof raw === "string" ? new fabric.Shadow(raw) : raw;
@@ -54,7 +63,51 @@ function snapshotShadow(obj: fabric.FabricObject): CopiedObjectStyle["shadow"] {
     blur: shadow.blur ?? 24,
     offsetX: shadow.offsetX ?? 0,
     offsetY: shadow.offsetY ?? 12,
+    affectStroke: !!shadow.affectStroke,
+    nonScaling: !!shadow.nonScaling,
   };
+}
+
+function clonePaint(fill: unknown): unknown {
+  if (fill == null || typeof fill === "string") return fill;
+  if (typeof fill !== "object" || typeof (fill as { toObject?: () => unknown }).toObject !== "function") {
+    return undefined;
+  }
+  try {
+    const data = (fill as { toObject: () => Record<string, unknown> }).toObject();
+    if (data && (data.type === "linear" || data.type === "radial" || "colorStops" in data)) {
+      return new fabric.Gradient(data as ConstructorParameters<typeof fabric.Gradient>[0]);
+    }
+  } catch {
+    /* keep string/backup fill */
+  }
+  return undefined;
+}
+
+function snapshotFill(obj: fabric.FabricObject, icon: boolean, backupFill: unknown): unknown {
+  if (icon) return readIconFill(obj);
+  const live = obj.fill;
+  if (typeof live === "string" && live) return live;
+  const cloned = clonePaint(live);
+  if (cloned != null) return cloned;
+  return typeof backupFill === "string" ? backupFill : undefined;
+}
+
+function applyCopiedShadow(obj: fabric.FabricObject, style: CopiedObjectStyle) {
+  const next = style.shadow
+    ? new fabric.Shadow({
+        color: style.shadow.color,
+        blur: style.shadow.blur,
+        offsetX: style.shadow.offsetX,
+        offsetY: style.shadow.offsetY,
+        affectStroke: style.shadow.affectStroke,
+        nonScaling: style.shadow.nonScaling,
+      })
+    : null;
+  obj.set({ shadow: next });
+  obj.objectCaching = next != null ? false : obj.objectCaching;
+  const backup = (obj as { _stylePresetBackup?: { shadow?: fabric.FabricObject["shadow"] } })._stylePresetBackup;
+  if (backup) backup.shadow = next;
 }
 
 export function captureObjectStyle(obj: fabric.FabricObject): CopiedObjectStyle {
@@ -64,24 +117,18 @@ export function captureObjectStyle(obj: fabric.FabricObject): CopiedObjectStyle 
   const stylePreset = readStylePreset(obj);
   const backup = (obj as { _stylePresetBackup?: { fill?: unknown; stroke?: unknown; strokeWidth?: number } })
     ._stylePresetBackup;
-  const liveFill = icon
-    ? readIconFill(obj)
-    : typeof obj.fill === "string" && obj.fill
-      ? obj.fill
-      : undefined;
   const liveStroke = icon
     ? readIconStroke(obj)
     : typeof obj.stroke === "string"
       ? obj.stroke
       : undefined;
   const liveStrokeWidth = icon ? readIconStrokeWidth(obj) : obj.strokeWidth || 0;
-  const fill = liveFill || (typeof backup?.fill === "string" ? backup.fill : undefined);
   const stroke = liveStroke || (typeof backup?.stroke === "string" ? backup.stroke : undefined);
   const strokeWidth =
     liveStrokeWidth ||
     (typeof backup?.strokeWidth === "number" ? backup.strokeWidth : 0);
   const style: CopiedObjectStyle = {
-    fill,
+    fill: snapshotFill(obj, icon, backup?.fill),
     stroke,
     strokeWidth,
     opacity: obj.opacity ?? 1,
@@ -119,11 +166,11 @@ export function applyObjectStyle(obj: fabric.FabricObject, style: CopiedObjectSt
   obj.set({ opacity: style.opacity ?? 1 });
 
   if (icon) {
-    if (style.fill) applyIconFill(obj, style.fill);
+    if (typeof style.fill === "string" && style.fill) applyIconFill(obj, style.fill);
     applyIconStroke(obj, style.stroke ?? "", style.strokeWidth ?? 0);
   } else if (text) {
     const next: Record<string, unknown> = {};
-    if (style.fill) next.fill = style.fill;
+    if (typeof style.fill === "string" && style.fill) next.fill = style.fill;
     if (style.fontFamily) next.fontFamily = style.fontFamily;
     if (style.fontSize != null) next.fontSize = style.fontSize;
     if (style.fontWeight != null) next.fontWeight = style.fontWeight;
@@ -137,7 +184,7 @@ export function applyObjectStyle(obj: fabric.FabricObject, style: CopiedObjectSt
     const radius = style.cornerRadius ?? style.rx;
     if (typeof radius === "number") applyImageCornerRadius(obj, radius);
   } else {
-    if (style.fill) obj.set({ fill: style.fill });
+    if (style.fill != null && style.fill !== "") obj.set({ fill: style.fill as fabric.FabricObject["fill"] });
     obj.set({
       stroke: style.stroke ?? "",
       strokeWidth: style.strokeWidth ?? 0,
@@ -148,18 +195,13 @@ export function applyObjectStyle(obj: fabric.FabricObject, style: CopiedObjectSt
     }
   }
 
-  if (style.stylePreset !== "glass") {
-    obj.set({
-      shadow: style.shadow ? new fabric.Shadow(style.shadow) : null,
-    });
-    obj.objectCaching = style.shadow != null ? false : obj.objectCaching;
-  }
-
   if (!text) {
     applyStylePreset(obj, style.stylePreset);
     if (style.stylePreset === "glass") {
       applyGlassOptions(obj, style.glassOptions);
-      if (!icon && !image && style.fill) obj.set({ fill: style.fill });
+      if (!icon && !image && style.fill != null && style.fill !== "") {
+        obj.set({ fill: style.fill as fabric.FabricObject["fill"] });
+      }
       if (!icon && !image) {
         obj.set({
           stroke: style.stroke ?? "",
@@ -169,6 +211,7 @@ export function applyObjectStyle(obj: fabric.FabricObject, style: CopiedObjectSt
     }
   }
 
+  applyCopiedShadow(obj, style);
   obj.dirty = true;
 }
 
@@ -200,6 +243,9 @@ const STYLE_PATCH_KEYS = new Set([
   "fontWeight",
   "textAlign",
   "_iconFill",
+  "_iconName",
+  "_iconUrl",
+  "src",
   "opacity",
   "text",
 ]);
@@ -216,8 +262,8 @@ export function pickStylePatchProps(props: Record<string, unknown>): Record<stri
 export function applyObjectPatch(obj: fabric.FabricObject, props: Record<string, unknown>) {
   const next = { ...props };
   delete next.type;
-  delete next.src;
   delete next.version;
+  if (!isIconObject(obj)) delete next.src;
   if ("_stylePreset" in next) {
     applyStylePreset(obj, String(next._stylePreset) as StylePresetId);
     delete next._stylePreset;

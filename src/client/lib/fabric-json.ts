@@ -5,6 +5,7 @@ import { restoreStylePresets } from "./style-presets";
 import { restoreElementGroups } from "./element-group";
 import { restoreObjectIdentities } from "./object-identity";
 import { hydratePageBackground } from "./design-images";
+import { hydrateDesignIconFills } from "./design-icons";
 import { applyDesignStylesToCanvas } from "./design-style-sync";
 import { documentFromCanvasJson } from "../../design/project";
 import { canvasSceneSize, parseFabricJSON } from "../../shared/canvas-json";
@@ -80,7 +81,10 @@ export async function loadFabricJSON(
     restoreObjectIdentities(canvas);
     restoreLockedBackgrounds(canvas);
     const doc = documentFromCanvasJson(JSON.stringify(parsed));
-    if (doc) applyDesignStylesToCanvas(canvas, doc);
+    if (doc) {
+      applyDesignStylesToCanvas(canvas, doc);
+      await hydrateDesignIconFills(canvas, doc);
+    }
     // Every load path (page switch, undo, template, thumbnail, headless export,
     // and design-tool reload) must restore the page photo to scene dimensions.
     await hydratePageBackground(canvas, scene?.width, scene?.height);

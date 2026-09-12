@@ -5,6 +5,7 @@ export interface Design {
   width: number;
   height: number;
   thumbnail_url: string | null;
+  thumbnail_at?: string | null;
   created_at: string;
   updated_at: string;
   updated_by?: "editor" | "cli";

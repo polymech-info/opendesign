@@ -114,7 +114,7 @@ function oneLine(name: string, result: unknown): string {
   if (name === "image_understand") {
     if (r.ok === false) return String(r.error ?? understandAnswer(r) ?? "image_understand failed.");
     const answer = understandAnswer(r);
-    if (answer) return answer.slice(0, 400);
+    if (answer) return answer;
     return "Read the screenshot.";
   }
   if (name === "design_set_page_background") {
@@ -158,13 +158,19 @@ function outputPathFromEnvelope(r: Record<string, unknown>): string | undefined 
   return undefined;
 }
 
+function isNoopToolCallsText(text: string): boolean {
+  const compact = text.replace(/\s+/g, "");
+  return compact === '{"tool_calls":[]}' || compact === '{"tool_calls":null}' || compact === "[]";
+}
+
 /** Bubble text after host-run tools — strips JSON, keeps short model prose if any. */
 export function assistantDisplayText(
   raw: string,
   runs: ToolRun[],
   opts?: { truncated?: boolean; parseFailed?: boolean },
 ): string {
-  const prose = stripDesignToolJsonFromText(raw).trim();
+  const stripped = stripDesignToolJsonFromText(raw).trim();
+  const prose = isNoopToolCallsText(stripped) || isNoopToolCallsText(raw.trim()) ? "" : stripped;
   const toolLine = runs.length
     ? assistantReplyForDesignTools(runs, { truncated: opts?.truncated })
     : opts?.parseFailed

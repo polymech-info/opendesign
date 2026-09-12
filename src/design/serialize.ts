@@ -71,7 +71,10 @@ export function serializeDsl(doc: DesignDocument): string {
     out.push("");
   }
   const scene = doc.nodes.filter((n) => n.type !== "use" && !n.parentId);
-  for (const n of scene) out.push(nodeLine(n));
+  for (const n of scene) {
+    out.push(nodeLine(n));
+    for (const line of serializeNodePropOverrides(n)) out.push(line);
+  }
   const uses = doc.nodes.filter((n) => n.type === "use");
   if (uses.length) out.push("");
   for (const u of uses) {

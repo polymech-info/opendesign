@@ -106,7 +106,42 @@ function pipeChildLogs(child: ChildProcess) {
   child.stderr?.on("data", write);
 }
 
-export async function ensureLlmServer(opts: { cwd: string; searchFrom: string }): Promise<LlmHandle> {
+export async function registerHostToolProvider(
+  llm: LlmTarget,
+  spec: { id: string; url: string },
+): Promise<boolean> {
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (llm.key) {
+    headers.authorization = `Bearer ${llm.key}`;
+    headers["x-api-key"] = llm.key;
+  }
+  try {
+    const res = await fetch(`${llm.url.replace(/\/$/, "")}/v1/host-tool-providers`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(spec),
+    });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "");
+      console.warn(
+        `  LLM:     host tool provider ${spec.id} register failed HTTP ${res.status}${detail ? ` ${detail.slice(0, 180)}` : ""}`,
+      );
+      return false;
+    }
+    console.log(`  LLM:     host tool provider ${spec.id} → ${spec.url}`);
+    return true;
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    console.warn(`  LLM:     host tool provider ${spec.id} register failed: ${detail}`);
+    return false;
+  }
+}
+
+export async function ensureLlmServer(opts: {
+  cwd: string;
+  searchFrom: string;
+  hostToolProvider?: { id: string; url: string };
+}): Promise<LlmHandle> {
   const requested = process.env.OPEND_LLM_URL?.trim() || `http://${DEFAULT_HOST}:${DEFAULT_PORT}`;
   const { url, host, port } = parseLlmUrl(requested);
   /** Only if you opt in — `tanit-cli --serve` is open on loopback by default. */
@@ -150,6 +185,9 @@ export async function ensureLlmServer(opts: { cwd: string; searchFrom: string })
     "--consent-ui",
     process.env.OPEND_LLM_CONSENT?.trim() || "yolo",
   ];
+  if (opts.hostToolProvider) {
+    args.push("--host-tool-provider", `${opts.hostToolProvider.id}=${opts.hostToolProvider.url}`);
+  }
   if (key) args.push("--serve-api-key", key);
 
   const env = { ...process.env };

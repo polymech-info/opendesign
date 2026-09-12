@@ -3,9 +3,12 @@ export interface ImageAttachment {
   url: string;
   name: string;
   isLocal?: boolean;
+  /** Upload key under `.OpenDesign/` so the brief can list an absolute path. */
+  src?: string;
 }
 
 export interface ToolRunRecord {
+  id?: string;
   name: string;
   arguments: Record<string, unknown>;
   result: unknown;

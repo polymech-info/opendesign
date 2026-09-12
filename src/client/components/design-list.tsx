@@ -1,9 +1,9 @@
 import { useState } from "preact/hooks";
-import { Trash2, Edit3, Plus } from "lucide-preact";
+import { Trash2, Edit3, Copy, Plus } from "lucide-preact";
 import { useEditor } from "../context";
 
 export function DesignList() {
-  const { designs, activeDesign, createDesign, loadDesign, deleteDesign, renameDesign, navigate } =
+  const { designs, activeDesign, createDesign, loadDesign, deleteDesign, duplicateDesign, renameDesign, navigate } =
     useEditor();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
@@ -71,6 +71,16 @@ export function DesignList() {
             </div>
           )}
           <div class="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity ml-1">
+            <button
+              class="p-1 rounded text-zinc-400 bg-transparent border-none cursor-pointer hover:text-zinc-800 transition-colors"
+              title="Duplicate"
+              onClick={(e) => {
+                e.stopPropagation();
+                void duplicateDesign(d.id);
+              }}
+            >
+              <Copy size={12} />
+            </button>
             <button
               class="p-1 rounded text-zinc-400 bg-transparent border-none cursor-pointer hover:text-zinc-800 transition-colors"
               onClick={(e) => {

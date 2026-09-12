@@ -103,6 +103,10 @@ function checkAssetsOnDisk(cwd: string, json: string) {
   }
 }
 
+export function designFileSlug(name: string) {
+  return slug(name);
+}
+
 export async function runExport(opts: {
   cwd: string;
   query?: string;
@@ -112,7 +116,8 @@ export async function runExport(opts: {
   port: number;
   clientDir: string;
   iconDir: string;
-}) {
+  quiet?: boolean;
+}): Promise<string> {
   if (!fs.existsSync(path.join(opts.clientDir, "index.html"))) {
     throw new Error("Client bundle missing. Run npm run build, then: pm-opendesign export");
   }
@@ -194,7 +199,8 @@ export async function runExport(opts: {
     fs.writeFileSync(out, png);
     if (missing.length) log(`${missing.length} missing/failed line(s); PNG still written`);
     log(`wrote ${png.byteLength}B`);
-    console.log(out);
+    if (!opts.quiet) console.log(out);
+    return out;
   } finally {
     stop();
   }

@@ -27,7 +27,7 @@ export type UpdateArgs = {
 };
 
 export type CreateObject = {
-  type: NodeType;
+  type: NodeType | string;
   id: string;
   x?: number;
   y?: number;
@@ -40,6 +40,7 @@ export type CreateObject = {
   style?: string;
   text?: string;
   src?: string;
+  icon?: string;
   parent?: string;
   /** Insert under existing cards / images (page photo stays at the back). */
   behind?: boolean;
@@ -60,6 +61,13 @@ export type ToolResult = {
 };
 
 const GEOM = new Set(["x", "y", "w", "h"]);
+
+function normalizeCreateType(type: string): NodeType {
+  const t = type.trim().toLowerCase();
+  if (t === "rect" || t === "rectangle" || t === "box") return "shape";
+  if (t === "text" || t === "textbox" || t === "label") return "txt";
+  return t as NodeType;
+}
 
 function canvasGeom(doc: DesignDocument | undefined, node: DesignNode, key: string, n: number): number {
   if (!doc || !node.parentId || (key !== "x" && key !== "y")) return n;
@@ -157,6 +165,133 @@ function coerceTransformExpr(expr: unknown): string {
   return String(expr);
 }
 
+function roundPx(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+function expandSelection(doc: DesignDocument, nodes: DesignNode[]): DesignNode[] {
+  const seen = new Set<string>();
+  const out: DesignNode[] = [];
+  const add = (node: DesignNode) => {
+    if (seen.has(node.id)) return;
+    seen.add(node.id);
+    out.push(node);
+  };
+  for (const node of nodes) {
+    add(node);
+    if (node.type !== "use") continue;
+    for (const child of doc.nodes.filter((n) => n.parentId === node.id)) add(child);
+  }
+  return out;
+}
+
+function selectionBox(nodes: DesignNode[]): { x: number; y: number; w: number; h: number } | null {
+  if (!nodes.length) return null;
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (const node of nodes) {
+    x0 = Math.min(x0, node.bounds.x);
+    y0 = Math.min(y0, node.bounds.y);
+    x1 = Math.max(x1, node.bounds.x + node.bounds.w);
+    y1 = Math.max(y1, node.bounds.y + node.bounds.h);
+  }
+  if (!Number.isFinite(x0) || !Number.isFinite(y0)) return null;
+  return { x: x0, y: y0, w: Math.max(1, x1 - x0), h: Math.max(1, y1 - y0) };
+}
+
+function readOrigin(
+  transform: Record<string, unknown> | undefined,
+  nodes: DesignNode[],
+): { x: number; y: number } {
+  const box = selectionBox(nodes);
+  const fallback = { x: box?.x ?? 0, y: box?.y ?? 0 };
+  const raw = transform?.origin ?? transform?.center;
+  if (raw && typeof raw === "object") {
+    const rec = raw as Record<string, unknown>;
+    const x = Number(rec.x ?? rec.left);
+    const y = Number(rec.y ?? rec.top);
+    return {
+      x: Number.isFinite(x) ? x : fallback.x,
+      y: Number.isFinite(y) ? y : fallback.y,
+    };
+  }
+  const x = Number(transform?.originX ?? transform?.ox);
+  const y = Number(transform?.originY ?? transform?.oy);
+  return {
+    x: Number.isFinite(x) ? x : fallback.x,
+    y: Number.isFinite(y) ? y : fallback.y,
+  };
+}
+
+function scaleNode(node: DesignNode, scale: number, originX: number, originY: number): Record<string, unknown> | null {
+  const next = {
+    x: roundPx(originX + (node.bounds.x - originX) * scale),
+    y: roundPx(originY + (node.bounds.y - originY) * scale),
+    w: roundPx(Math.max(1, node.bounds.w * scale)),
+    h: roundPx(Math.max(1, node.bounds.h * scale)),
+  };
+  const changes: Record<string, unknown> = { id: node.id };
+  let changed = false;
+  for (const key of ["x", "y", "w", "h"] as const) {
+    const from = node.bounds[key];
+    if (from === next[key]) continue;
+    node.bounds[key] = next[key];
+    changes[key] = { from, to: next[key] };
+    changed = true;
+  }
+  const radius = Number(node.props.radius);
+  if (Number.isFinite(radius) && radius > 0) {
+    const nextRadius = String(roundPx(radius * scale));
+    if (node.props.radius !== nextRadius) {
+      changes.radius = { from: node.props.radius, to: nextRadius };
+      node.props.radius = nextRadius;
+      changed = true;
+    }
+  }
+  return changed ? changes : null;
+}
+
+function scaleNodes(
+  nodes: DesignNode[],
+  scale: number,
+  originX: number,
+  originY: number,
+): Array<Record<string, unknown>> {
+  const diff: Array<Record<string, unknown>> = [];
+  for (const node of nodes) {
+    const hit = scaleNode(node, scale, originX, originY);
+    if (hit) diff.push(hit);
+  }
+  return diff;
+}
+
+function fitNodes(
+  nodes: DesignNode[],
+  area: { x: number; y: number; w: number; h: number },
+): Array<Record<string, unknown>> {
+  const box = selectionBox(nodes);
+  if (!box) return [];
+  const scale = Math.min(area.w / box.w, area.h / box.h);
+  if (!Number.isFinite(scale) || scale <= 0) return [];
+  const diff = scaleNodes(nodes, scale, box.x, box.y);
+  const nextBox = selectionBox(nodes);
+  if (!nextBox) return diff;
+  const shiftX = roundPx(area.x + (area.w - nextBox.w) / 2 - nextBox.x);
+  const shiftY = roundPx(area.y + (area.h - nextBox.h) / 2 - nextBox.y);
+  if (shiftX === 0 && shiftY === 0) return diff;
+  for (const node of nodes) {
+    node.bounds.x = roundPx(node.bounds.x + shiftX);
+    node.bounds.y = roundPx(node.bounds.y + shiftY);
+    const row = diff.find((item) => item.id === node.id);
+    if (row && row.x && typeof row.x === "object") (row.x as { to: number }).to = node.bounds.x;
+    if (row && row.y && typeof row.y === "object") (row.y as { to: number }).to = node.bounds.y;
+    if (!row) diff.push({ id: node.id, x: { to: node.bounds.x }, y: { to: node.bounds.y } });
+  }
+  return diff;
+}
+
 function applyTransform(node: DesignNode, key: string, expr: unknown): { from: unknown; to: unknown } | null {
   if (key === "width") key = "w";
   if (key === "height") key = "h";
@@ -209,6 +344,7 @@ function flattenCreate(spec: CreateObject): CreateObject {
   }
   return {
     ...rec,
+    type: normalizeCreateType(String(rec.type ?? "shape")),
     x: rec.x ?? (position ? num(position.x) : 0),
     y: rec.y ?? (position ? num(position.y) : 0),
     w: Number.isFinite(Number(w)) ? Number(w) : 0,
@@ -224,6 +360,7 @@ function propsFromCreateSpec(spec: CreateObject): Record<string, string> {
     const next = coercePropValue(rec[key]);
     if (next != null) props[key] = next;
   }
+  if (typeof rec.icon === "string" && rec.icon.trim()) props.icon = rec.icon.trim();
   return props;
 }
 
@@ -252,7 +389,7 @@ function objectFromSpec(spec: CreateObject): DesignNode {
   const src = flat.src;
   return {
     id: flat.id,
-    type: flat.type,
+    type: flat.type as NodeType,
     parentId: flat.parent,
     role: flat.role,
     bounds: {
@@ -272,6 +409,14 @@ function objectFromSpec(spec: CreateObject): DesignNode {
   };
 }
 
+function coversPage(doc: DesignDocument, spec: { x?: number; y?: number; w?: number; h?: number }): boolean {
+  const x = Number(spec.x ?? 0);
+  const y = Number(spec.y ?? 0);
+  const w = Number(spec.w ?? 0);
+  const h = Number(spec.h ?? 0);
+  return x <= 8 && y <= 8 && w >= doc.canvas.width * 0.85 && h >= doc.canvas.height * 0.85;
+}
+
 export function createObjects(
   doc: DesignDocument,
   objects: CreateObject[],
@@ -287,6 +432,14 @@ export function createObjects(
       continue;
     }
     const flat = flattenCreate(spec);
+    if (flat.type === "shape" && coversPage(target, flat)) {
+      errors.push({
+        id: spec.id,
+        error:
+          "full-page shape is not a page background — it covers the scene. Use image_create output_path=uploads/backgrounds/… then design_set_page_background.",
+      });
+      continue;
+    }
     const behind = Boolean(opts?.behind || spec.behind || (spec as { behind?: boolean }).behind);
     if ((flat.w ?? 0) < 0 || (flat.h ?? 0) < 0) {
       errors.push({ id: spec.id, error: "width would become negative" });
@@ -387,6 +540,16 @@ export function layoutObjects(doc: DesignDocument, where: string, layout: Layout
       if (moveInstance(doc, node, x, originY)) diff.push({ id: node.id, x: { from: from.x, to: x }, y: { from: from.y, to: originY } });
       x += (node.bounds.w || 0) + gapX;
     }
+  } else if (kind === "fit" || kind === "fit-canvas" || kind === "contain") {
+    const pad = 80;
+    const targets = expandSelection(doc, nodes);
+    const fitted = fitNodes(targets, {
+      x: Number(area.x ?? pad),
+      y: Number(area.y ?? pad),
+      w: Number(area.w ?? Math.max(1, doc.canvas.width - pad * 2)),
+      h: Number(area.h ?? Math.max(1, doc.canvas.height - pad * 2)),
+    });
+    return { ok: true, matched: nodes.length, changed: fitted.length, touched: targets.map((n) => n.id), diff: fitted };
   } else {
     return { ok: false, errors: [{ error: `unknown layout type '${kind}'` }] };
   }
@@ -462,7 +625,18 @@ export function updateObjects(doc: DesignDocument, args: UpdateArgs): ToolResult
     }
   } else {
     const nodes = args.where ? matchingNodes(target, args.where, { includeUse: true }) : [];
-    for (const node of nodes) applyTo(node, args.set, args.transform, args.replace);
+    const transform = args.transform as Record<string, unknown> | undefined;
+    const scale = Number(transform?.scale ?? transform?.s);
+    if (transform && Number.isFinite(scale) && scale > 0) {
+      const targets = expandSelection(target, nodes);
+      const origin = readOrigin(transform, targets);
+      const scaled = scaleNodes(targets, scale, origin.x, origin.y);
+      matched += nodes.length;
+      touched.push(...targets.map((n) => n.id));
+      diff.push(...scaled);
+    } else {
+      for (const node of nodes) applyTo(node, args.set, args.transform, args.replace);
+    }
   }
 
   if (errors.length) return { ok: false, matched, changed: 0, touched, errors, warnings, diff };

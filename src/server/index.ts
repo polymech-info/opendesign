@@ -24,7 +24,11 @@ import {
   type UploadKind,
 } from "./uploads.js";
 import { mountLlmProxy, type LlmTarget } from "./llm.js";
+import { mountAgentTools } from "./agent-tools.js";
 import { appendDesignJournal, readDesignJournal } from "./design-journal.js";
+import { mcpDeleteResponse, mcpGetResponse, mcpOptionsResponse, mcpPostResponse } from "../mcp/http.js";
+import { loadProjectGuides } from "./project-guides.js";
+import { imageBytesFromDataUrl, pngBytesFromDataUrl, writeProjectDesignPng } from "./project-png.js";
 
 export type AppOptions = {
   roots: Roots;
@@ -39,6 +43,7 @@ const DesignSchema = z.object({
   width: z.number(),
   height: z.number(),
   thumbnail_url: z.string().nullable(),
+  thumbnail_at: z.string().nullable().optional(),
   created_at: z.string(),
   updated_at: z.string(),
   updated_by: z.enum(["editor", "cli"]).optional(),
@@ -123,6 +128,7 @@ export function createOpenDesignApp(opts: AppOptions) {
 
   app.use("*", async (c, next) => tablerMiddleware(iconDir, c, next));
   if (llm) mountLlmProxy(app, llm);
+  mountAgentTools(app, { cwd: roots.cwd });
 
   app.get("/api/meta", (c) =>
     c.json({
@@ -133,6 +139,16 @@ export function createOpenDesignApp(opts: AppOptions) {
       merge: "union of global + project; same id/key uses the project copy",
     })
   );
+
+  app.get("/api/guides", (c) => c.json(loadProjectGuides(roots.cwd)));
+
+  const mcpCtx = { cwd: roots.cwd, llm };
+  for (const route of ["/api/mcp", "/mcp"]) {
+    app.options(route, () => mcpOptionsResponse());
+    app.get(route, (c) => mcpGetResponse(c));
+    app.delete(route, (c) => mcpDeleteResponse(c));
+    app.post(route, (c) => mcpPostResponse(c, mcpCtx));
+  }
 
   app.post("/api/export-jobs/:token/log", async (c) => {
     const token = c.req.param("token");
@@ -186,6 +202,7 @@ Lists MERGE both folders (union). Same id/filename: project copy is used; unique
 - DELETE /api/designs/{id}/versions/{rev}
 - POST /api/designs/{id}/versions/{rev}/restore
 - GET/PUT/DELETE /api/designs/{id}
+- POST /api/designs/{id}/duplicate
 - POST /api/designs/{id}/pages
 - PUT/DELETE /api/pages/{pageId}
 - POST /api/pages/{pageId}/duplicate
@@ -193,6 +210,7 @@ Lists MERGE both folders (union). Same id/filename: project copy is used; unique
 - GET /api/templates/{id}
 - GET/POST /api/elements
 - DELETE /api/elements/{id}
+- POST /api/export/png
 - GET/POST /api/uploads
 - GET/DELETE /api/uploads/file/{key}
 - GET /api/icons/search
@@ -202,6 +220,10 @@ Lists MERGE both folders (union). Same id/filename: project copy is used; unique
 - GET /api/openapi.json
 - ALL /api/llm/*  (proxy to tanit-cli llm agent --serve)
 - POST /api/path-tools/call  (image_create / image_transform / image_understand → tanit path-tools)
+- GET /api/agent-tools
+- GET /api/agent-tools/context
+- PUT /api/agent-tools/session
+- POST /api/agent-tools/call
 - GET/POST /api/design/journal  (append/read design tool apply log — .OpenDesign/journal/design-changes.jsonl)
 `)
   );
@@ -433,6 +455,35 @@ Lists MERGE both folders (union). Same id/filename: project copy is used; unique
     return c.json(row, 200);
   });
 
+  app.post("/api/designs/:id/thumbnail", async (c) => {
+    const id = c.req.param("id");
+    const body = (await c.req.json().catch(() => null)) as { image?: unknown } | null;
+    const image = typeof body?.image === "string" ? body.image : "";
+    const parsed = imageBytesFromDataUrl(image);
+    if (!parsed) return c.json({ error: "Expected a PNG or JPEG data URL" }, 400);
+    if (parsed.bytes.length > 4 * 1024 * 1024) return c.json({ error: "Thumbnail too large" }, 413);
+    const uploaded = putUploadKey(roots, `uploads/thumbs/${id}.${parsed.ext}`, parsed.bytes);
+    const row = store.setDesignThumbnail(roots, id, uploaded.url);
+    if (!row) return c.json({ error: "Not found" }, 404);
+    return c.json(row, 200);
+  });
+
+  const duplicateDesign = createRoute({
+    method: "post",
+    path: "/api/designs/{id}/duplicate",
+    request: { params: z.object({ id: z.string() }) },
+    responses: {
+      200: { content: { "application/json": { schema: DesignWithPagesSchema } }, description: "OK" },
+      404: { content: { "application/json": { schema: ErrorSchema } }, description: "Not found" },
+    },
+  });
+  app.openapi(duplicateDesign, (c) => {
+    const { id } = c.req.valid("param");
+    const row = store.duplicateDesign(roots, id);
+    if (!row) return c.json({ error: "Not found" }, 404);
+    return c.json(row, 200);
+  });
+
   const deleteDesign = createRoute({
     method: "delete",
     path: "/api/designs/{id}",
@@ -559,6 +610,16 @@ Lists MERGE both folders (union). Same id/filename: project copy is used; unique
     const row = store.getTemplate(roots, id);
     if (!row) return c.json({ error: "Not found" }, 404);
     return c.json(row, 200);
+  });
+
+  app.post("/api/export/png", async (c) => {
+    const body = (await c.req.json().catch(() => null)) as { name?: unknown; image?: unknown } | null;
+    const name = typeof body?.name === "string" ? body.name : "design";
+    const image = typeof body?.image === "string" ? body.image : "";
+    const bytes = pngBytesFromDataUrl(image);
+    if (!bytes) return c.json({ error: "Expected a PNG data URL" }, 400);
+    if (bytes.length > 25 * 1024 * 1024) return c.json({ error: "PNG too large" }, 413);
+    return c.json(writeProjectDesignPng(roots, name, bytes), 200);
   });
 
   app.get("/api/uploads", (c) => {

@@ -47,6 +47,7 @@ export type Design = {
   width: number;
   height: number;
   thumbnail_url: string | null;
+  thumbnail_at?: string | null;
   created_at: string;
   updated_at: string;
   updated_by?: DesignWriter;
@@ -187,6 +188,7 @@ export function updateDesign(
     width: patch.width ?? hit.row.width,
     height: patch.height ?? hit.row.height,
     thumbnail_url: patch.thumbnail_url !== undefined ? patch.thumbnail_url : hit.row.thumbnail_url,
+    thumbnail_at: patch.thumbnail_url !== undefined ? hit.row.updated_at : hit.row.thumbnail_at,
     updated_at: nowIso(),
     updated_by: updatedBy,
     pages: hit.row.pages ?? [],
@@ -196,9 +198,53 @@ export function updateDesign(
   return design;
 }
 
+/** Write a preview without treating it as a scene edit (keeps updated_at). */
+export function setDesignThumbnail(roots: Roots, id: string, thumbnail_url: string): Design | null {
+  const hit = findInLayers<DesignRecord>(roots, "designs", id);
+  if (!hit) return null;
+  const next: DesignRecord = {
+    ...hit.row,
+    thumbnail_url,
+    thumbnail_at: hit.row.updated_at,
+  };
+  writeLayer(roots, "designs", hit.layer, next);
+  const { pages: _pages, source: _source, ...design } = next;
+  return design;
+}
+
 export function deleteDesign(roots: Roots, id: string) {
   deleteAllDesignVersions(roots, id);
   return deleteLayer(roots, "designs", id);
+}
+
+export function duplicateDesign(roots: Roots, id: string): DesignRecord | null {
+  const src = getDesign(roots, id);
+  if (!src) return null;
+  const created = nowIso();
+  const newId = randomUUID();
+  const pages = (src.pages ?? []).map((page, i) => ({
+    ...page,
+    id: randomUUID(),
+    design_id: newId,
+    created_at: created,
+    sort_order: page.sort_order ?? i,
+    canvas_json: sanitizeCanvasJSONString(page.canvas_json || "{}"),
+  }));
+  const row: DesignRecord = {
+    id: newId,
+    name: `${src.name} (copy)`,
+    canvas_json: pages[0]?.canvas_json ?? src.canvas_json,
+    width: src.width,
+    height: src.height,
+    thumbnail_url: null,
+    thumbnail_at: null,
+    created_at: created,
+    updated_at: created,
+    updated_by: "editor",
+    pages,
+  };
+  writeLayer(roots, "designs", "project", row);
+  return row;
 }
 
 function saveDesignRecord(roots: Roots, layer: Layer, row: DesignRecord, updatedBy: DesignWriter = "editor") {

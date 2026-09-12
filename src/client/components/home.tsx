@@ -1,8 +1,9 @@
-import { useState, useCallback } from "preact/hooks";
-import { Plus, Trash2, Edit3, Sparkles, ChevronDown } from "lucide-preact";
+import { useState, useCallback, useEffect } from "preact/hooks";
+import { Plus, Trash2, Edit3, Copy, Sparkles, ChevronDown } from "lucide-preact";
 import type { Design, Template } from "../types";
 import { TemplateCard } from "./template-card";
 import { CANVAS_SIZES } from "../context";
+import { thumbnailCacheSrc } from "../../design/thumbnails";
 
 interface HomeProps {
   designs: Design[];
@@ -10,8 +11,10 @@ interface HomeProps {
   navigate: (to: string) => void;
   createDesign: (size?: { width: number; height: number }) => Promise<string | undefined>;
   deleteDesign: (id: string) => Promise<void>;
+  duplicateDesign: (id: string) => Promise<string | undefined>;
   renameDesign: (id: string, name: string) => Promise<void>;
   createFromTemplate: (template: Template) => Promise<string | undefined>;
+  refreshThumbnails: () => Promise<void>;
 }
 
 export function Home({
@@ -20,8 +23,10 @@ export function Home({
   navigate,
   createDesign,
   deleteDesign,
+  duplicateDesign,
   renameDesign,
   createFromTemplate,
+  refreshThumbnails,
 }: HomeProps) {
   const [showSizes, setShowSizes] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -55,8 +60,13 @@ export function Home({
     setEditingId(null);
   };
 
+  const designIds = designs.map((d) => d.id).join();
+  useEffect(() => {
+    void refreshThumbnails();
+  }, [refreshThumbnails, designIds]);
+
   return (
-    <div class="min-h-full bg-[#F3F4F7]">
+    <div class="h-full overflow-y-auto bg-[#F3F4F7]">
       {/* Header */}
       <div class="bg-white border-b border-zinc-200">
         <div class="max-w-6xl mx-auto px-6 py-5 flex items-center justify-between">
@@ -148,7 +158,7 @@ export function Home({
                   <div class="aspect-[4/3] bg-zinc-100 flex items-center justify-center">
                     {d.thumbnail_url ? (
                       <img
-                        src={d.thumbnail_url}
+                        src={thumbnailCacheSrc(d.thumbnail_url, d.thumbnail_at || d.updated_at)}
                         alt={d.name}
                         class="w-full h-full object-cover"
                       />
@@ -186,6 +196,16 @@ export function Home({
                           </p>
                         </div>
                         <div class="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity ml-2 shrink-0">
+                          <button
+                            class="p-1 rounded text-zinc-400 bg-transparent border-none cursor-pointer hover:text-zinc-700 transition-colors"
+                            title="Duplicate"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void duplicateDesign(d.id);
+                            }}
+                          >
+                            <Copy size={12} />
+                          </button>
                           <button
                             class="p-1 rounded text-zinc-400 bg-transparent border-none cursor-pointer hover:text-zinc-700 transition-colors"
                             onClick={(e) => startRename(d.id, d.name, e)}

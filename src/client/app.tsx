@@ -69,6 +69,14 @@ export function App() {
     }
   }, [designState.pages, canvasState.activeCanvasId]);
 
+  useEffect(() => {
+    const name = designState.activeDesign?.name?.trim();
+    document.title = designId && name ? `${name} · OpenDesign` : "OpenDesign";
+    return () => {
+      document.title = "OpenDesign";
+    };
+  }, [designId, designState.activeDesign?.name]);
+
   if (exportDesignId) return <HeadlessExport designId={exportDesignId} />;
 
   if (designState.loading || (designId && designState.activeDesign?.id !== designId)) {
@@ -90,8 +98,10 @@ export function App() {
         navigate={navigate}
         createDesign={designState.createDesign}
         deleteDesign={designState.deleteDesign}
+        duplicateDesign={designState.duplicateDesign}
         renameDesign={designState.renameDesign}
         createFromTemplate={designState.createFromTemplate}
+        refreshThumbnails={designState.refreshThumbnails}
       />
     );
   }

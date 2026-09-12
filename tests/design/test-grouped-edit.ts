@@ -12,6 +12,7 @@ import {
   fabricJsonHasGroups,
   findNode,
   getActiveDocument,
+  parseDsl,
   projectToFabricJSON,
   setActiveDocument,
   writeCliCanvasJson,
@@ -207,12 +208,91 @@ assert.ok(chatGroup);
 const groupedTitle = (chatGroup.objects ?? []).find((o) => o._id === "feature.chat.title");
 assert.ok(groupedTitle);
 assert.equal(groupedTitle.fill, "#EF4444");
+const redShapes = dispatchDesignTool(
+  "design_update",
+  { where: "type=shape", set: { fill: "#FF0000" } },
+  groupedDoc,
+) as { ok?: boolean; changed?: number };
+assert.equal(redShapes.ok, true);
+assert.ok((redShapes.changed ?? 0) >= 3);
+const savedShapes = JSON.parse(writeCliCanvasJson(groupedJson, groupedDoc, { source: "agent" })) as {
+  objects: Array<Record<string, unknown> & { objects?: Array<Record<string, unknown> & { fill?: string; _id?: string }> }>;
+};
+const chatGroupAfter = savedShapes.objects.find((g) => g._id === "group.feature.chat");
+const groupedBg = (chatGroupAfter?.objects ?? []).find((o) => o._id === "feature.chat.bg");
+assert.equal(groupedBg?.fill, "#FF0000", "cli persist paints grouped card backgrounds red");
+const iconPatch = dispatchDesignTool(
+  "design_update",
+  { patches: [{ id: "feature.chat.icon", set: { fill: "#C4B5FD", icon: "message-circle" } }] },
+  groupedDoc,
+) as { ok?: boolean; changed?: number };
+assert.equal(iconPatch.ok, true);
+assert.ok((iconPatch.changed ?? 0) >= 1);
+const savedIcon = JSON.parse(writeCliCanvasJson(groupedJson, groupedDoc, { source: "agent" })) as {
+  objects: Array<Record<string, unknown> & { objects?: Array<Record<string, unknown> & { fill?: string; _iconFill?: string; _iconName?: string; _id?: string }> }>;
+};
+const chatGroupIcon = savedIcon.objects.find((g) => g._id === "group.feature.chat");
+const groupedIcon = (chatGroupIcon?.objects ?? []).find((o) => o._id === "feature.chat.icon");
+assert.equal(groupedIcon?.fill, "#C4B5FD", "cli persist paints grouped icon fill");
+assert.equal(groupedIcon?._iconFill, "#C4B5FD", "cli persist stores grouped icon fill extra");
+assert.equal(groupedIcon?._iconName, "message-circle", "cli persist stores grouped icon glyph");
 assert.equal(groupedTitle.left, 108, "grouped title must keep child-local x");
 assert.equal(groupedTitle.top, 24, "grouped title must keep child-local y");
 assert.equal(
   saved.objects.some((o) => o._id === "feature.chat.title"),
   false,
   "title must stay inside the group, not explode to the canvas root",
+);
+
+const quadDoc = parseDsl(`canvas main 1080 1080
+theme tanit-light
+
+widget quad w=260 h=260
+  shape tl x=0 y=0 w=120 h=120
+  shape tr x=140 y=0 w=120 h=120
+  shape bl x=0 y=140 w=120 h=120
+  shape br x=140 y=140 w=120 h=120
+`);
+dispatchDesignTool("design_use_widget", { widget: "quad", id: "quad.1", x: 40, y: 40 }, quadDoc);
+const quadRects = ["tl", "tr", "bl", "br"].map((slot, i) => {
+  const rect = new fabric.Rect({
+    left: [0, 140, 0, 140][i],
+    top: [0, 0, 140, 140][i],
+    width: 120,
+    height: 120,
+    fill: "#94a3b8",
+    originX: "left",
+    originY: "top",
+  });
+  (rect as fabric.Rect & { _id?: string })._id = `quad.1.${slot}`;
+  return rect;
+});
+const quadGroup = new fabric.Group(quadRects, {
+  left: 40,
+  top: 40,
+  originX: "left",
+  originY: "top",
+});
+(quadGroup as fabric.Group & { _id?: string })._id = "group.quad.1";
+const localsBefore = quadRects.map((rect) => ({ id: (rect as { _id?: string })._id, left: rect.left, top: rect.top }));
+const quadCanvas = {
+  getObjects: () => [quadGroup],
+  requestRenderAll: () => {},
+} as unknown as fabric.Canvas;
+const quadFit = dispatchDesignTool(
+  "design_update",
+  { where: "id=quad.1", layout: { type: "fit", area: { x: 0, y: 0, w: 1080, h: 1080 } } },
+  quadDoc,
+) as { ok?: boolean };
+assert.equal(quadFit.ok, true);
+assert.equal(await syncDesignNodesToCanvas(quadCanvas, quadDoc, ["quad.1"]), true);
+const quadUse = findNode(quadDoc, "quad.1")!;
+assert.equal(Math.abs(quadGroup.left! + 0 - quadUse.bounds.x) < 0.5, true, "grouped stack moves to the fitted origin");
+assert.equal(Math.abs(quadUse.bounds.x + quadUse.bounds.w / 2 - 540) < 0.5, true, "grouped stack is centered on the 1:1 canvas");
+assert.deepEqual(
+  quadRects.map((rect) => ({ id: (rect as { _id?: string })._id, left: rect.left, top: rect.top })),
+  localsBefore,
+  "centering a grouped 2×2 must not rewrite child-local frames",
 );
 
 console.log("test:grouped-edit PASS");

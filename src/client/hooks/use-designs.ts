@@ -4,6 +4,9 @@ import { api } from "../api";
 import { bundledFeatureCardsTemplate } from "../../design/example";
 import { documentFromCanvasJson } from "../../design/project";
 import { setActiveDocument } from "../../design/tools";
+import { shouldReloadInsteadOfSave } from "../../design/apply-host-scene";
+import { designNeedsThumbnail } from "../../design/thumbnails";
+import { renderDesignThumbnail } from "../lib/design-thumbnail";
 
 function withFeatureCardsTemplate(templates: Template[]): Template[] {
   if (templates.some((t) => t.id === "feature-cards")) return templates;
@@ -27,11 +30,18 @@ export function useDesigns(getCanvasJSONForPage: (pageId: string) => string) {
   const [versions, setVersions] = useState<DesignVersion[]>([]);
   const [activeVersionRev, setActiveVersionRev] = useState<number | null>(null);
   const activeVersionRevRef = useRef<number | null>(null);
+  const designsRef = useRef<Design[]>([]);
+  const thumbsBusyRef = useRef(false);
+  const thumbsQueuedRef = useRef(false);
 
   // Keep activePageIdRef in sync
   useEffect(() => {
     activePageIdRef.current = activePageId;
   }, [activePageId]);
+
+  useEffect(() => {
+    designsRef.current = designs;
+  }, [designs]);
 
   useEffect(() => {
     activeVersionRevRef.current = activeVersionRev;
@@ -54,6 +64,44 @@ export function useDesigns(getCanvasJSONForPage: (pageId: string) => string) {
       }
     })();
   }, []);
+
+  const refreshThumbnails = useCallback(async () => {
+    if (thumbsBusyRef.current) {
+      thumbsQueuedRef.current = true;
+      return;
+    }
+    thumbsBusyRef.current = true;
+    try {
+      do {
+        thumbsQueuedRef.current = false;
+        for (const design of designsRef.current) {
+          if (!designNeedsThumbnail(design)) continue;
+          try {
+            const image = await renderDesignThumbnail(design.canvas_json, design.width, design.height);
+            if (!image) continue;
+            if (design.id === activeIdRef.current) continue;
+            const updated = await api<Design>("POST", `/api/designs/${design.id}/thumbnail`, { image });
+            setDesigns((prev) =>
+              prev.map((row) =>
+                row.id === updated.id
+                  ? { ...row, thumbnail_url: updated.thumbnail_url, thumbnail_at: updated.thumbnail_at }
+                  : row,
+              ),
+            );
+          } catch (e) {
+            console.warn("Failed to export design thumbnail:", design.id, e);
+          }
+        }
+      } while (thumbsQueuedRef.current);
+    } finally {
+      thumbsBusyRef.current = false;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (loading) return;
+    void refreshThumbnails();
+  }, [loading, refreshThumbnails]);
 
   const refreshVersions = useCallback(async (id?: string | null) => {
     const designId = id ?? activeIdRef.current;
@@ -100,6 +148,34 @@ export function useDesigns(getCanvasJSONForPage: (pageId: string) => string) {
     });
   }, [getCanvasJSONForPage, pages]);
 
+  const reloadFromDisk = useCallback(async (id: string, rev: DesignRevision) => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    const d = await api<DesignWithPages>("GET", `/api/designs/${id}`);
+    seenUpdatedAtRef.current = d.updated_at;
+    setActiveDesign(d);
+    setPages(d.pages);
+    const page = d.pages.find((p) => p.id === activePageIdRef.current) ?? d.pages[0] ?? null;
+    if (page) setActivePageId(page.id);
+    setActiveDocument(documentFromCanvasJson(page?.canvas_json));
+    setDiskReloadEpoch((n) => n + 1);
+    setDiskNotice(rev.updated_by === "cli" ? "Reloaded from CLI" : "Reloaded from disk");
+    window.setTimeout(() => setDiskNotice(null), 4000);
+  }, []);
+
+  const refreshFromDisk = useCallback(async () => {
+    const id = activeIdRef.current;
+    if (!id) return;
+    try {
+      const rev = await api<DesignRevision>("GET", `/api/designs/${id}/revision`);
+      await reloadFromDisk(id, rev);
+    } catch (e) {
+      console.error("Failed to refresh from disk:", e);
+    }
+  }, [reloadFromDisk]);
+
   const saveDesign = useCallback(async (opts?: { snapshot?: boolean }) => {
     if (!activeIdRef.current) return;
     if (saveTimerRef.current) {
@@ -108,6 +184,13 @@ export function useDesigns(getCanvasJSONForPage: (pageId: string) => string) {
     }
     setSaving(true);
     try {
+      if (activeVersionRevRef.current == null) {
+        const rev = await api<DesignRevision>("GET", `/api/designs/${activeIdRef.current}/revision`);
+        if (shouldReloadInsteadOfSave(rev, seenUpdatedAtRef.current)) {
+          await reloadFromDisk(activeIdRef.current, rev);
+          return;
+        }
+      }
       const pagePayload = collectPagePayload();
       const firstPageJson = pagePayload[0]?.canvas_json ?? "{}";
       const viewingRev = activeVersionRevRef.current;
@@ -143,7 +226,7 @@ export function useDesigns(getCanvasJSONForPage: (pageId: string) => string) {
     } finally {
       setSaving(false);
     }
-  }, [collectPagePayload, snapshotVersion]);
+  }, [collectPagePayload, reloadFromDisk, snapshotVersion]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -220,17 +303,35 @@ export function useDesigns(getCanvasJSONForPage: (pageId: string) => string) {
     [refreshVersions]
   );
 
+  const acceptHostRevision = useCallback((updatedAt?: string, canvasJson?: string) => {
+    if (updatedAt?.trim()) seenUpdatedAtRef.current = updatedAt.trim();
+    const pageId = activePageIdRef.current;
+    if (!pageId || !canvasJson || canvasJson === "{}") return;
+    setPages((prev) => prev.map((page) => (page.id === pageId ? { ...page, canvas_json: canvasJson } : page)));
+    setActiveDesign((prev) =>
+      prev
+        ? {
+            ...prev,
+            canvas_json: canvasJson,
+            ...(updatedAt?.trim() ? { updated_at: updatedAt.trim() } : {}),
+          }
+        : prev,
+    );
+  }, []);
+
+  const flashNotice = useCallback((message: string) => {
+    setDiskNotice(message);
+    window.setTimeout(() => setDiskNotice(null), 4000);
+  }, []);
+
   const applyCheckout = useCallback((nextPages: Page[], notice: string | null) => {
     setPages(nextPages);
     const page = nextPages.find((p) => p.id === activePageIdRef.current) ?? nextPages[0] ?? null;
     if (page) setActivePageId(page.id);
     setActiveDocument(documentFromCanvasJson(page?.canvas_json));
     setDiskReloadEpoch((n) => n + 1);
-    if (notice) {
-      setDiskNotice(notice);
-      window.setTimeout(() => setDiskNotice(null), 4000);
-    }
-  }, []);
+    if (notice) flashNotice(notice);
+  }, [flashNotice]);
 
   const switchVersion = useCallback(
     async (rev: number | null) => {
@@ -272,6 +373,29 @@ export function useDesigns(getCanvasJSONForPage: (pageId: string) => string) {
     [saveDesign, snapshotVersion, switchVersion],
   );
 
+  const restoreVersion = useCallback(
+    async (rev: number) => {
+      const id = activeIdRef.current;
+      if (!id) return;
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+      try {
+        const d = await api<DesignWithPages>("POST", `/api/designs/${id}/versions/${rev}/restore`);
+        const { pages: nextPages, ...listed } = d;
+        seenUpdatedAtRef.current = listed.updated_at;
+        setActiveDesign(listed);
+        setDesigns((prev) => prev.map((row) => (row.id === listed.id ? listed : row)));
+        setActiveVersionRev(null);
+        applyCheckout(nextPages, `Restored #${rev}`);
+      } catch (e) {
+        console.error("Failed to restore version:", e);
+      }
+    },
+    [applyCheckout],
+  );
+
   const deleteVersion = useCallback(async (rev: number) => {
     const id = activeIdRef.current;
     if (!id) return;
@@ -297,6 +421,20 @@ export function useDesigns(getCanvasJSONForPage: (pageId: string) => string) {
       console.error("Failed to delete:", e);
     }
   }, []);
+
+  const duplicateDesign = useCallback(async (id: string): Promise<string | undefined> => {
+    try {
+      if (activeIdRef.current === id && activeVersionRevRef.current == null) {
+        await saveDesign({ snapshot: false });
+      }
+      const full = await api<DesignWithPages>("POST", `/api/designs/${id}/duplicate`);
+      const { pages: _pages, ...listed } = full;
+      setDesigns((prev) => [listed, ...prev.filter((x) => x.id !== listed.id)]);
+      return full.id;
+    } catch (e) {
+      console.error("Failed to duplicate design:", e);
+    }
+  }, [saveDesign]);
 
   const renameDesign = useCallback(async (id: string, name: string) => {
     try {
@@ -401,19 +539,6 @@ export function useDesigns(getCanvasJSONForPage: (pageId: string) => string) {
 
   const activePage = pages.find((p) => p.id === activePageId) ?? null;
 
-  const reloadFromDisk = useCallback(async (id: string, rev: DesignRevision) => {
-    const d = await api<DesignWithPages>("GET", `/api/designs/${id}`);
-    seenUpdatedAtRef.current = d.updated_at;
-    setActiveDesign(d);
-    setPages(d.pages);
-    const page = d.pages.find((p) => p.id === activePageIdRef.current) ?? d.pages[0] ?? null;
-    if (page) setActivePageId(page.id);
-    setActiveDocument(documentFromCanvasJson(page?.canvas_json));
-    setDiskReloadEpoch((n) => n + 1);
-    setDiskNotice(rev.updated_by === "cli" ? "Reloaded from CLI" : "Reloaded from disk");
-    window.setTimeout(() => setDiskNotice(null), 4000);
-  }, []);
-
   useEffect(() => {
     if (loading) return;
     const tick = async () => {
@@ -460,15 +585,21 @@ export function useDesigns(getCanvasJSONForPage: (pageId: string) => string) {
     loadDesign,
     saveDesign,
     deleteDesign,
+    duplicateDesign,
     renameDesign,
     setDesignDimensions,
     scheduleSave,
+    refreshFromDisk,
+    acceptHostRevision,
+    refreshThumbnails,
     diskReloadEpoch,
     diskNotice,
+    flashNotice,
     versions,
     activeVersionRev,
     refreshVersions,
     saveVersion,
+    restoreVersion,
     deleteVersion,
     switchVersion,
     // Pages

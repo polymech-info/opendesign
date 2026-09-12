@@ -47,9 +47,27 @@ export function isCanvasImageUploadKey(key: string): boolean {
   );
 }
 
+/** Join an upload key onto the absolute `.OpenDesign` project root (Tanit cwd). */
+export function joinProjectPath(projectRoot: string, key: string): string {
+  const root = projectRoot.trim().replace(/[/\\]+$/, "");
+  const sep = root.includes("\\") ? "\\" : "/";
+  const rel = resolveUploadKey(key).replace(/[/\\]+/g, sep);
+  return `${root}${sep}${rel}`;
+}
+
+/** Path `image_understand` should copy: absolute when project root is known, else the upload key. */
+export function pictureUnderstandPath(projectRoot: string | undefined, src: string): string | null {
+  const key = normalizeUploadKey(src);
+  if (!key.startsWith("uploads/") || key.startsWith("http://") || key.startsWith("https://") || key.startsWith("data:")) {
+    return null;
+  }
+  if (projectRoot?.trim()) return joinProjectPath(projectRoot, key);
+  return key;
+}
+
 export function uploadPathHints(): string {
   return [
-    "CWD=.OpenDesign — image_create/image_transform/image_understand use relative paths here",
+    "CWD=.OpenDesign — image_create/image_transform/image_understand accept relative upload keys or the absolute PICTURES paths",
     "page bg: output_path uploads/backgrounds/{slug}-v{n}.png → design_set_page_background",
     "canvas img: output_path uploads/{slug}-v{n}.png → design_insert_image",
     "screenshot: design_screenshot → uploads/screenshots/canvas.jpg then image_understand paths=[that exact path]",

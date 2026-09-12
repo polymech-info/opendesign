@@ -7,6 +7,8 @@ import {
   Maximize,
   Download,
   FileJson,
+  Copy,
+  ClipboardCopy,
   Save,
   ChevronDown,
   Home,
@@ -56,9 +58,12 @@ export function Toolbar({
     zoomIn,
     zoomOut,
     exportPNG,
+    copyDesignToClipboard,
+    flashNotice,
     getCanvasJSONForPage,
     pages,
     saveDesign,
+    duplicateDesign,
     saving,
     diskNotice,
     activeVersionRev,
@@ -324,9 +329,44 @@ export function Toolbar({
         <div class="w-px h-5 bg-zinc-300 mx-1" />
 
         <button
+          class="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-semibold border border-zinc-300 cursor-pointer transition-all bg-transparent text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 disabled:opacity-50 disabled:cursor-not-allowed"
+          onClick={async () => {
+            if (!activeDesign) return;
+            const id = await duplicateDesign(activeDesign.id);
+            if (id) navigate(`/design/${id}`);
+          }}
+          disabled={saving || !activeDesign}
+          title="Duplicate this design"
+        >
+          <Copy size={13} />
+          Duplicate
+        </button>
+        <button
+          class="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-semibold border border-zinc-300 cursor-pointer transition-all bg-transparent text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 disabled:opacity-50 disabled:cursor-not-allowed"
+          onClick={async () => {
+            const ok = await copyDesignToClipboard();
+            flashNotice(ok ? "Copied to clipboard" : "Could not copy to clipboard");
+          }}
+          disabled={!activeDesign}
+          title="Copy design to clipboard"
+        >
+          <ClipboardCopy size={13} />
+          Copy
+        </button>
+        <button
           class="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-semibold border border-zinc-300 cursor-pointer transition-all bg-transparent text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900"
-          onClick={exportPNG}
-          title="Export as PNG"
+          onClick={(e) => {
+            const name = activeDesign?.name;
+            if (e.shiftKey) {
+              e.preventDefault();
+              void exportPNG({ toProject: true, name }).then((written) => {
+                if (written?.relative) flashNotice(written.relative);
+              });
+              return;
+            }
+            void exportPNG({ name });
+          }}
+          title="Export as PNG. Shift-click saves to .OpenDesign/designs/title_n.png"
         >
           <Download size={13} />
           PNG

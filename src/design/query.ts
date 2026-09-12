@@ -1,3 +1,4 @@
+import { normalizeUploadKey } from "./upload-paths";
 import { DEFAULT_FIELDS, type DesignDocument, type DesignNode } from "./types";
 
 export type QueryArgs = {
@@ -33,16 +34,23 @@ function fieldValue(node: DesignNode, key: string, doc: DesignDocument): string 
     case "y":
       return node.bounds.y;
     case "w":
+    case "width":
       return node.bounds.w;
     case "h":
+    case "height":
       return node.bounds.h;
+    case "name":
+      return node.id;
+    case "fill":
+    case "color":
+      return node.props.fill;
     case "src": {
       if (node.imageBinding) {
         const resolved = doc.content[node.imageBinding];
-        if (resolved != null) return resolved;
+        if (resolved != null) return normalizeUploadKey(String(resolved));
         return `@${node.imageBinding}`;
       }
-      return node.src;
+      return node.src ? normalizeUploadKey(node.src) : undefined;
     }
     case "text": {
       if (node.textBinding) return `@${node.textBinding}`;

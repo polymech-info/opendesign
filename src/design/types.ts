@@ -55,7 +55,7 @@ export type DesignDocument = {
   errors: Array<{ id?: string; field?: string; code: string; message: string }>;
 };
 
-export const DEFAULT_FIELDS = ["id", "type", "x", "y", "w", "h", "style", "text", "role", "preset", "src"] as const;
+export const DEFAULT_FIELDS = ["id", "type", "x", "y", "w", "h", "fill", "style", "text", "role", "preset", "src"] as const;
 
 export function emptyDocument(): DesignDocument {
   return {

@@ -208,24 +208,47 @@ function applyOptsFromArgs(args: Record<string, unknown>, selection?: MediaSelec
   };
 }
 
+function imgIdMatchingSrc(doc: DesignDocument, src?: string): string | undefined {
+  if (!src?.trim()) return undefined;
+  const key = resolveUploadKey(src);
+  return doc.nodes.find((n) => n.type === "img" && n.src && resolveUploadKey(n.src) === key)?.id;
+}
+
+function selectionFromIds(doc: DesignDocument, ids?: string[]): MediaSelection | undefined {
+  for (const id of ids ?? []) {
+    const node = findNode(doc, id);
+    if (node?.type === "img") {
+      return { id, srcKey: node.src ? resolveUploadKey(node.src) : undefined };
+    }
+  }
+  return undefined;
+}
+
+export function isMediaWriteTool(name: string): boolean {
+  return name === "image_transform" || name === "image_create" || name === "transform";
+}
+
 /** Apply canvas IR change from a completed image_create/image_transform result. */
 export function applyUploadFromToolResult(
   doc: DesignDocument,
   toolName: string,
   result: unknown,
   args?: Record<string, unknown>,
-  opts?: { selection?: MediaSelection },
+  opts?: { selection?: MediaSelection; selectionIds?: string[] },
 ): { tool: string; result: unknown; outputPath: string } | null {
   const outputPath =
     outputPathFromToolResult(result) ?? (args ? intendedOutputPath(args) : undefined);
   if (!outputPath) return null;
   const r = result as { ok?: boolean } | null;
   if (r && r.ok === false) return null;
-  const auto = autoApplyUploadPath(
-    doc,
-    outputPath,
-    args ? applyOptsFromArgs(args, opts?.selection) : undefined,
-  );
+  const selection = opts?.selection ?? selectionFromIds(doc, opts?.selectionIds);
+  const applyOpts: MediaApplyOpts = args ? applyOptsFromArgs(args, selection) : {};
+  if (!applyOpts.replaceId && args) {
+    const paths = Array.isArray(args.paths) ? args.paths.map(String) : [];
+    const match = imgIdMatchingSrc(doc, paths[0]);
+    if (match) applyOpts.replaceId = match;
+  }
+  const auto = autoApplyUploadPath(doc, outputPath, applyOpts);
   if (!auto?.result || typeof auto.result !== "object" || !(auto.result as { ok?: boolean }).ok) return null;
   return { tool: auto.tool, result: auto.result, outputPath: normalizeUploadKey(outputPath) };
 }
@@ -247,7 +270,7 @@ export async function applyEmittedMediaTools(
     let result: unknown;
 
     if (understand && !(args.paths as string[] | undefined)?.length) {
-      result = { ok: false, error: "image_understand needs paths (from design_screenshot result)" };
+      result = { ok: false, error: "image_understand needs paths (from PICTURES or design_screenshot result)" };
     } else if (opts?.execute === false) {
       result = intended ? syntheticOkResult(name, intended) : { ok: true, skipped: true };
     } else if (!understand && intended && await uploadAlreadyExists(intended)) {

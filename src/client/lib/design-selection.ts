@@ -9,11 +9,7 @@ import { isIconObject } from "./tabler-icons";
  * Fabric wrapper groups use generated IDs such as `group_1`; their children
  * point back to the stable `use` instance (for example `feature.chat`).
  */
-export function designSelectionIds(
-  selected: fabric.FabricObject | null | undefined,
-  doc: DesignDocument,
-): string[] {
-  if (!selected) return [];
+function idsFromObject(selected: fabric.FabricObject, doc: DesignDocument): string[] {
   const direct = readObjectId(selected);
   if (direct && findNode(doc, direct)) return [direct];
   if (!(selected instanceof fabric.Group) || isIconObject(selected)) return [];
@@ -28,4 +24,15 @@ export function designSelectionIds(
   const parents = [...new Set(nodes.map((node) => node?.parentId).filter((id): id is string => !!id))];
   if (parents.length === 1 && findNode(doc, parents[0])?.type === "use") return parents;
   return [...new Set(childIds)];
+}
+
+export function designSelectionIds(
+  selected: fabric.FabricObject | fabric.FabricObject[] | null | undefined,
+  doc: DesignDocument,
+): string[] {
+  if (!selected) return [];
+  const objects = Array.isArray(selected) ? selected : [selected];
+  const ids: string[] = [];
+  for (const obj of objects) ids.push(...idsFromObject(obj, doc));
+  return [...new Set(ids)];
 }

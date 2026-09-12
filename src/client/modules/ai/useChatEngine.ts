@@ -1,8 +1,10 @@
 import { useState, useRef, useCallback, useEffect } from "preact/hooks";
 import type { JSX } from "preact";
-import type OpenAI from "openai";
-import { createOpenAIClient, listLlmModels, type LlmModel } from "../../lib/openai";
-import { fileToDataUrl, type ChatMessage, type ImageAttachment } from "./types";
+import { listLlmModels, type LlmModel } from "../../lib/openai";
+import { uploadImageFileMeta } from "../../lib/file-drop";
+import { fileToDataUrl, type ChatMessage, type ImageAttachment, type ToolRunRecord } from "./types";
+import { isMediaWriteTool, outputPathFromToolResult, pathToolFailed } from "./designTools";
+import { streamTanitCompletion } from "./streamTanit";
 import {
   listSessions,
   loadSession as loadSessionData,
@@ -11,29 +13,6 @@ import {
   generateSessionTitle,
   type ChatSession,
 } from "./chatSessions";
-import {
-  assistantDisplayText,
-  dedupeToolCalls,
-  describeDesignToolJsonIssues,
-  looksTruncatedDesignToolJson,
-  countEmittedJsonObjects,
-  parseEmittedToolCalls,
-  screenshotResultForLog,
-  shouldWarnDesignResponseTruncation,
-  stripDesignToolJsonFromText,
-  toolFollowUpFromRuns,
-} from "./designTools";
-import { appendStreamDelta, dedupeRepeatedContent } from "./streamText";
-import type { ToolRunRecord } from "./types";
-import type { ToolCall } from "./designTools";
-
-export type DesignToolRunContext = {
-  sessionId: string;
-  messageId: string;
-  finishReason: string | null;
-  parsedCalls: ToolCall[];
-  jsonObjectCount: number;
-};
 
 const HISTORY_KEY = "opend-chat-prompt-history";
 const MAX_HISTORY = 40;
@@ -75,6 +54,30 @@ function persistHistory(items: string[]) {
   }
 }
 
+function mediaApplyKey(run: ToolRunRecord): string | undefined {
+  if (!isMediaWriteTool(run.name) || pathToolFailed(run.result)) return undefined;
+  const result = run.result && typeof run.result === "object" ? (run.result as Record<string, unknown>) : {};
+  if (result.pending) return undefined;
+  return run.id || outputPathFromToolResult(run.result) || run.name;
+}
+
+async function applyHostMediaWrites(runs: ToolRunRecord[], seen: Set<string>) {
+  for (const run of runs) {
+    const key = mediaApplyKey(run);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    try {
+      await fetch("/api/agent-tools/apply-media", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: run.name, arguments: run.arguments, result: run.result }),
+      });
+    } catch {
+      seen.delete(key);
+    }
+  }
+}
+
 export function useChatEngine(namespace = "opend") {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -92,14 +95,8 @@ export function useChatEngine(namespace = "opend") {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
-  const extraToolsRef = useRef<(() => any[]) | null>(null);
-  const designContextRef = useRef<(() => string | null) | null>(null);
-  const runDesignToolsRef = useRef<
-    ((
-      text: string,
-      ctx: DesignToolRunContext,
-    ) => Promise<Array<{ name: string; result: unknown }>> | Array<{ name: string; result: unknown }>) | null
-  >(null);
+  const prepareTurnRef = useRef<(() => Promise<{ picturePaths?: string[] } | void> | { picturePaths?: string[] } | void) | null>(null);
+  const onSceneToolsRef = useRef<((runs: ToolRunRecord[], seen: Set<string>) => void | Promise<void>) | null>(null);
   const isUserScrolledUpRef = useRef(false);
 
   const [sessionId, setSessionId] = useState<string>(() => crypto.randomUUID());
@@ -149,11 +146,14 @@ export function useChatEngine(namespace = "opend") {
     const next: ImageAttachment[] = [];
     for (const file of imageFiles) {
       try {
+        const url = await fileToDataUrl(file);
+        const uploaded = await uploadImageFileMeta(file);
         next.push({
           id: crypto.randomUUID(),
-          url: await fileToDataUrl(file),
+          url,
           name: file.name,
           isLocal: true,
+          src: uploaded?.key,
         });
       } catch (err) {
         console.error("Failed to read file:", err);
@@ -222,8 +222,6 @@ export function useChatEngine(namespace = "opend") {
 
   const buildApiMessages = useCallback((chatHistory: ChatMessage[], userMsg: ChatMessage) => {
     const apiMessages: any[] = [];
-    const brief = designContextRef.current?.();
-    if (brief) apiMessages.push({ role: "system", content: brief });
     for (const m of [...chatHistory, userMsg]) {
       if (m.role === "tool") continue;
       const hasImages = m.images && m.images.length > 0;
@@ -238,9 +236,6 @@ export function useChatEngine(namespace = "opend") {
       } else {
         const extras: string[] = [];
         if (m.toolContext) extras.push(m.toolContext);
-        if (m.toolRuns?.length) {
-          extras.push(m.toolRuns.map((r) => JSON.stringify({ name: r.name, result: r.result })).join("\n"));
-        }
         apiMessages.push({
           role: m.role,
           content: extras.length ? [m.content, ...extras].filter(Boolean).join("\n\n") : m.content,
@@ -251,81 +246,50 @@ export function useChatEngine(namespace = "opend") {
   }, []);
 
   const runStreaming = useCallback(
-    async (client: OpenAI, apiMessages: any[], assistantId: string, signal: AbortSignal) => {
-      const baseURL = (client as any).baseURL ?? (client as any)._baseURL;
+    async (
+      apiMessages: unknown[],
+      assistantId: string,
+      signal: AbortSignal,
+      selection?: string[],
+      onTools?: (runs: ToolRunRecord[]) => void,
+    ) => {
       console.log("[Chat] stream start", {
         model,
-        baseURL,
         assistantId,
         messageCount: apiMessages.length,
-        roles: apiMessages.map((m: any) => m.role),
+        roles: apiMessages.map((m: { role?: string }) => m.role),
+        selection: selection?.length ?? 0,
       });
       const started = performance.now();
-      let stream;
-      try {
-        stream = await client.chat.completions.create(
-          { model, messages: apiMessages, stream: true, max_tokens: 4096 },
-          { signal },
-        );
-      } catch (err) {
-        console.error("[Chat] stream create failed", { model, baseURL, err });
-        throw err;
-      }
-      console.log("[Chat] stream opened", { model, ms: Math.round(performance.now() - started) });
-
-      let fullContent = "";
-      let chunkIndex = 0;
-      let finishReason: string | null = null;
-      try {
-        for await (const chunk of stream) {
-          chunkIndex += 1;
-          const choices = chunk?.choices;
-          const choice = Array.isArray(choices) ? choices[0] : undefined;
-          if (choice?.finish_reason) finishReason = String(choice.finish_reason);
-          const delta = choice?.delta?.content || "";
-          const odd = !Array.isArray(choices) || choices.length === 0;
-          if (odd || chunkIndex <= 3) {
-            console.log("[Chat] stream chunk", {
-              n: chunkIndex,
-              id: chunk?.id,
-              object: (chunk as any)?.object,
-              model: chunk?.model,
-              choicesLen: Array.isArray(choices) ? choices.length : choices,
-              finish: choice?.finish_reason,
-              deltaLen: delta.length,
-              keys: chunk && typeof chunk === "object" ? Object.keys(chunk) : typeof chunk,
-              raw: odd ? chunk : undefined,
-            });
-          }
-          if (delta) {
-            fullContent = appendStreamDelta(fullContent, delta);
-            const display = stripDesignToolJsonFromText(fullContent);
-            setMessages((prev) =>
-              prev.map((m) => (m.id === assistantId ? { ...m, content: display, isStreaming: true } : m)),
-            );
-          }
-        }
-      } catch (err) {
-        console.error("[Chat] stream iterate failed", {
-          model,
-          chunks: chunkIndex,
-          chars: fullContent.length,
-          err,
-        });
-        throw err;
-      }
+      const out = await streamTanitCompletion({
+        model,
+        messages: apiMessages,
+        sessionId,
+        selection,
+        signal,
+        onUpdate: ({ text, toolRuns }) => {
+          onTools?.(toolRuns);
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantId
+                ? { ...m, content: text, toolRuns: toolRuns.length ? toolRuns : undefined, isStreaming: true }
+                : m,
+            ),
+          );
+        },
+      });
+      onTools?.(out.toolRuns);
       console.log("[Chat] stream done", {
         model,
-        chunks: chunkIndex,
-        chars: fullContent.length,
-        finishReason,
+        chars: out.text.length,
+        tools: out.toolRuns.length,
+        finishReason: out.finishReason,
         ms: Math.round(performance.now() - started),
-        tail: fullContent.slice(-160),
+        tail: out.text.slice(-160),
       });
-      fullContent = dedupeRepeatedContent(fullContent);
-      return { text: fullContent, finishReason };
+      return out;
     },
-    [model],
+    [model, sessionId],
   );
 
   const sendMessage = useCallback(
@@ -334,7 +298,6 @@ export function useChatEngine(namespace = "opend") {
       const trimmed = textToUse.trim();
       if ((!trimmed && attachments.length === 0) || isGenerating) return;
 
-      const client = createOpenAIClient({ sessionId });
       console.log("[Chat] session", { sessionId, history: messages.length });
       if (trimmed) {
         setPromptHistory((prev) => {
@@ -372,136 +335,39 @@ export function useChatEngine(namespace = "opend") {
       abortRef.current = abort;
 
       try {
+        const extra = await prepareTurnRef.current?.();
+        const picturePaths = extra && typeof extra === "object" ? extra.picturePaths : undefined;
         const apiMessages = buildApiMessages(messages, userMsg);
-        const brief = typeof apiMessages[0]?.content === "string" && apiMessages[0]?.role === "system";
         console.log("[Chat] send", {
           model,
           history: messages.length,
           apiMessages: apiMessages.length,
           images: msgImages.length,
-          designBrief: brief,
+          picturePaths: picturePaths?.length ?? 0,
         });
-        // --serve ignores client tools[]; stream, then host-run any JSON tool_calls.
-        const historyForApi: ChatMessage[] = [...messages, userMsg];
-        const finishStream = async (
-          streamText: string,
-          finishReason: string | null,
-          currentAssistantId: string,
-          prior: ChatMessage[],
-          followFlags: { canFollowShot: boolean; canFollowUnderstand: boolean },
-        ): Promise<void> => {
-          const text = streamText || "";
-          const parsedCalls = parseEmittedToolCalls(text);
-          const ran =
-            (await runDesignToolsRef.current?.(text, {
-              sessionId,
-              messageId: currentAssistantId,
-              finishReason,
-              parsedCalls,
-              jsonObjectCount: countEmittedJsonObjects(text),
-            })) ?? [];
-          const truncatedJson = looksTruncatedDesignToolJson(text);
-          const jsonIssues = describeDesignToolJsonIssues(text);
-          const warnTruncation = shouldWarnDesignResponseTruncation({
-            truncatedJson,
-            finishReason,
-            runs: ran,
-            parsedCount: parsedCalls.length,
-          });
-          const toolCalls = dedupeToolCalls(parsedCalls).filter((c) => c.name !== "done");
-          const usedRuns = new Set<number>();
-          const toolRuns: ToolRunRecord[] = toolCalls.map((call) => {
-            let idx = ran.findIndex((row, i) => !usedRuns.has(i) && row.name === call.name);
-            if (idx < 0 && (call.name === "image_create" || call.name === "image_transform")) {
-              idx = ran.findIndex(
-                (row, i) =>
-                  !usedRuns.has(i) &&
-                  (row.name === "design_update" ||
-                    row.name === "design_set_page_background" ||
-                    row.name === "design_insert_image"),
-              );
-            }
-            if (idx >= 0) usedRuns.add(idx);
-            return {
-              name: call.name,
-              arguments: call.arguments,
-              result: idx >= 0 ? screenshotResultForLog(call.name, ran[idx].result) : { ok: false, error: "not run" },
-            };
-          });
-          const hadDesignJson = /design_[a-z_]+/i.test(text);
-          console.log("[Chat] design tools", {
-            finishReason,
-            chars: text.length,
-            truncatedJson,
-            warnTruncation,
-            jsonIssues,
-            parsed: parsedCalls.map((c) => c.name),
-            ran: ran.map((r) => ({ name: r.name, ok: (r.result as { ok?: boolean })?.ok })),
-            tail: text.slice(-200),
-          });
-          if (truncatedJson && !warnTruncation) {
-            console.warn("[Chat] trailing design JSON after successful tool run (not shown to user)", {
-              jsonIssues,
-            });
-          }
-          const display = assistantDisplayText(text, ran, {
-            truncated: warnTruncation,
-            parseFailed: hadDesignJson && !parsedCalls.length,
-          });
-          const assistantDone: ChatMessage = {
-            id: currentAssistantId,
-            role: "assistant",
-            content: display,
-            timestamp: Date.now(),
-            toolRuns: toolRuns.length ? toolRuns : undefined,
-          };
-
-          setMessages((prev) =>
-            prev.map((m) => {
-              if (m.id !== currentAssistantId) return m;
-              return { ...m, isStreaming: false, content: display, toolRuns: toolRuns.length ? toolRuns : undefined };
-            }),
-          );
-
-          if (!parsedCalls.length && /design_[a-z_]+/i.test(text)) {
-            console.warn("[Chat] assistant emitted design tool JSON but host parsed 0 calls", {
-              text: text.slice(0, 240),
-            });
-          }
-
-          const follow = toolFollowUpFromRuns(ran, followFlags);
-          if (!follow || abort.signal.aborted) return;
-
-          const followUser: ChatMessage = {
-            id: crypto.randomUUID(),
-            role: "user",
-            content: follow.content,
-            timestamp: Date.now(),
-            hidden: true,
-          };
-          const followAssistantId = crypto.randomUUID();
-          const followAssistant: ChatMessage = {
-            id: followAssistantId,
-            role: "assistant",
-            content: "",
-            timestamp: Date.now(),
-            isStreaming: true,
-          };
-          setMessages((prev) => [...prev, followUser, followAssistant]);
-          const nextPrior = [...prior, assistantDone];
-          const nextApi = buildApiMessages(nextPrior, followUser);
-          const followOut = await runStreaming(client, nextApi, followAssistantId, abort.signal);
-          await finishStream(followOut?.text || "", followOut?.finishReason ?? null, followAssistantId, [...nextPrior, followUser], {
-            canFollowShot: false,
-            canFollowUnderstand: follow.kind === "screenshot",
-          });
-        };
-
-        const streamOut = await runStreaming(client, apiMessages, assistantId, abort.signal);
-        await finishStream(streamOut?.text || "", streamOut?.finishReason ?? null, assistantId, historyForApi, {
-          canFollowShot: true,
-          canFollowUnderstand: true,
+        const appliedMedia = new Set<string>();
+        const appliedScene = new Set<string>();
+        const streamOut = await runStreaming(apiMessages, assistantId, abort.signal, picturePaths, (runs) => {
+          void (async () => {
+            await applyHostMediaWrites(runs, appliedMedia);
+            await onSceneToolsRef.current?.(runs, appliedScene);
+          })();
         });
+        const text = streamOut?.text || "";
+        const toolRuns = streamOut?.toolRuns ?? [];
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId
+              ? {
+                  ...m,
+                  isStreaming: false,
+                  content: text,
+                  toolRuns: toolRuns.length ? toolRuns : undefined,
+                  hidden: !text.trim() && !toolRuns.length ? true : undefined,
+                }
+              : m,
+          ),
+        );
         setLlmReady(true);
       } catch (err: any) {
         if (err?.name === "AbortError" || String(err?.message || "").includes("aborted")) {
@@ -615,9 +481,8 @@ export function useChatEngine(namespace = "opend") {
     inputRef,
     fileInputRef,
     composerRef,
-    extraToolsRef,
-    designContextRef,
-    runDesignToolsRef,
+    prepareTurnRef,
+    onSceneToolsRef,
     promptHistory,
     historyIndex,
     navigateHistory,

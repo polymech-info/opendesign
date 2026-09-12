@@ -1,5 +1,5 @@
 import { useState } from "preact/hooks";
-import { History, Trash2 } from "lucide-preact";
+import { History, RotateCcw, Trash2 } from "lucide-preact";
 import { useEditor } from "../context";
 import type { DesignVersion } from "../types";
 
@@ -13,11 +13,13 @@ function VersionRow({
   version,
   active,
   onOpen,
+  onRestore,
   onDelete,
 }: {
   version: DesignVersion;
   active: boolean;
   onOpen: () => void;
+  onRestore: () => void;
   onDelete: () => void;
 }) {
   return (
@@ -48,6 +50,16 @@ function VersionRow({
           <p class="text-[10px] text-zinc-400 m-0 mt-0.5">{formatWhen(version.created_at)}</p>
         </div>
         <button
+          class="p-1 rounded text-zinc-400 bg-transparent border-none cursor-pointer hover:text-accent shrink-0"
+          title="Restore onto Current"
+          onClick={(e) => {
+            e.stopPropagation();
+            onRestore();
+          }}
+        >
+          <RotateCcw size={12} />
+        </button>
+        <button
           class="p-1 rounded text-zinc-400 bg-transparent border-none cursor-pointer hover:text-red-400 shrink-0"
           title="Delete version"
           onClick={(e) => {
@@ -68,6 +80,7 @@ export function VersionsPanel() {
     versions,
     activeVersionRev,
     saveVersion,
+    restoreVersion,
     deleteVersion,
     switchVersion,
     saving,
@@ -92,7 +105,7 @@ export function VersionsPanel() {
   return (
     <div class="flex flex-col gap-3">
       <p class="text-zinc-400 text-[11px] m-0">
-        Click to switch. Copy on one, paste on another — Current stays separate.
+        Click to preview. Restore writes that snapshot onto Current.
       </p>
       <div class="flex flex-col gap-1.5">
         <textarea
@@ -131,6 +144,7 @@ export function VersionsPanel() {
               version={version}
               active={activeVersionRev === version.rev}
               onOpen={() => void switchVersion(version.rev)}
+              onRestore={() => void restoreVersion(version.rev)}
               onDelete={() => void deleteVersion(version.rev)}
             />
           ))}

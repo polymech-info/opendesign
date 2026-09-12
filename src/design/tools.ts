@@ -223,7 +223,7 @@ export function emulateToolScript(
   return { results, text };
 }
 
-const TOOL_DOCS: Array<{ name: DesignToolName; description: string; parameters: Record<string, unknown> }> = [
+export const DESIGN_TOOL_DOCS: Array<{ name: DesignToolName; description: string; parameters: Record<string, unknown> }> = [
   {
     name: "design_query",
     description: "Query the design IR with simple predicates (type=txt role=title). Compact fields by default.",
@@ -285,7 +285,7 @@ const TOOL_DOCS: Array<{ name: DesignToolName; description: string; parameters: 
         transform: { type: "object" },
         replace: { type: "object" },
         patches: { type: "array", items: { type: "object" } },
-        layout: { type: "object", description: "column|left|top-left stack, or row. area.x/y + gap." },
+        layout: { type: "object", description: "column|row stack, or fit (scale selection into area/canvas). area.x/y/w/h + gap." },
         dry_run: { type: "boolean" },
       },
     },
@@ -385,7 +385,7 @@ const TOOL_DOCS: Array<{ name: DesignToolName; description: string; parameters: 
   {
     name: "design_screenshot",
     description:
-      "LAST RESORT: capture the live canvas to uploads/screenshots/ and return {path}. Then emit image_understand with that path. Prefer SCENE / design_query / design_get.",
+      "Capture the live editor canvas to uploads/screenshots/canvas.jpg and return {path}. Then call image_understand with that exact path. Prefer SCENE / design_query / design_get when DSL is enough.",
     parameters: {
       type: "object",
       properties: {
@@ -395,11 +395,15 @@ const TOOL_DOCS: Array<{ name: DesignToolName; description: string; parameters: 
   },
   {
     name: "design_search_icons",
-    description: "Search local Tabler icons and Iconify. Use a hit id with design_update set.icon.",
+    description:
+      "Search local Tabler icons and Iconify. Iconify query must be a single word (shield, lock, chat) — not a phrase. Use a hit id with design_update set.icon.",
     parameters: {
       type: "object",
       properties: {
-        query: { type: "string" },
+        query: {
+          type: "string",
+          description: "One word only, e.g. shield. Do not pass \"security shield\" or other multi-word phrases.",
+        },
         source: { type: "string", enum: ["local", "iconify", "all"] },
         limit: { type: "integer", default: 12 },
       },
@@ -408,7 +412,7 @@ const TOOL_DOCS: Array<{ name: DesignToolName; description: string; parameters: 
   },
 ];
 
-const MUTATING_TOOLS = new Set([
+export const MUTATING_DESIGN_TOOLS = new Set([
   "design_create",
   "design_update",
   "design_copy_styles",
@@ -428,7 +432,7 @@ export type DesignToolsOptions = {
 export function createDesignTools(doc?: DesignDocument | null, opts?: DesignToolsOptions) {
   const bound = doc === undefined ? active : doc;
   if (!bound) return [];
-  return TOOL_DOCS.map((spec) => ({
+  return DESIGN_TOOL_DOCS.map((spec) => ({
     type: "function" as const,
     function: {
       name: spec.name,
@@ -438,7 +442,7 @@ export function createDesignTools(doc?: DesignDocument | null, opts?: DesignTool
         const args = typeof raw === "string" ? JSON.parse(raw) : (raw as Record<string, unknown>) ?? {};
         const result =
           spec.name === "design_search_icons" ? await searchIcons(args) : dispatchDesignTool(spec.name, args, bound);
-        if (MUTATING_TOOLS.has(spec.name)) opts?.onChange?.(bound);
+        if (MUTATING_DESIGN_TOOLS.has(spec.name)) opts?.onChange?.(bound);
         return typeof result === "string" ? result : JSON.stringify(result);
       },
     },
@@ -446,12 +450,12 @@ export function createDesignTools(doc?: DesignDocument | null, opts?: DesignTool
 }
 
 export function designToolNames(): string[] {
-  return TOOL_DOCS.map((t) => t.name);
+  return DESIGN_TOOL_DOCS.map((t) => t.name);
 }
 
 export function designToolCatalog(names?: string[]): string {
   const allow = names?.length ? new Set(names) : null;
-  return TOOL_DOCS.filter((t) => !allow || allow.has(t.name))
+  return DESIGN_TOOL_DOCS.filter((t) => !allow || allow.has(t.name))
     .map((t) => `${t.name}: ${t.description} params=${JSON.stringify(t.parameters)}`)
     .join("\n");
 }
@@ -821,7 +825,7 @@ export async function applyEmittedDesignTools(
           ? await searchIcons(call.arguments)
           : dispatchDesignTool(call.name, call.arguments, target);
       out.push({ name: call.name, result });
-      if (MUTATING_TOOLS.has(call.name)) mutated = true;
+      if (MUTATING_DESIGN_TOOLS.has(call.name)) mutated = true;
     } catch (err) {
       out.push({ name: call.name, result: { ok: false, error: err instanceof Error ? err.message : String(err) } });
     }

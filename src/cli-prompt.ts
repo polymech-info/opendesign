@@ -11,6 +11,7 @@ import {
 import { pickDesign } from "./cli-export.js";
 import type { LlmTarget } from "./server/llm.js";
 import { resolveRoots } from "./server/paths.js";
+import { loadProjectGuides } from "./server/project-guides.js";
 import * as store from "./server/store.js";
 
 type PromptMessage = OpenAI.Chat.ChatCompletionMessageParam;
@@ -87,7 +88,7 @@ export async function runCliPrompt(opts: CliPromptOptions): Promise<CliPromptRes
   }
 
   const system = [
-    designChatBrief(doc),
+    designChatBrief(doc, { guides: loadProjectGuides(opts.cwd), projectRoot: roots.project }),
     "CLI MODE: no live Fabric canvas is open.",
     "Do not call design_screenshot, design_export, image_create, image_transform, or image_understand.",
     'After the requested edit succeeds, emit {"name":"done","arguments":{}}.',

@@ -1,320 +1,152 @@
-import { useChatEngine, type DesignToolRunContext } from "./useChatEngine";
-
+import { useEffect, useRef } from "preact/hooks";
+import { useChatEngine } from "./useChatEngine";
 import { ChatMessages } from "./ChatPanelMessages";
-
 import {
-
-  applyEmittedDesignTools,
-
-  applyEmittedMediaTools,
-
-  designChatBrief,
-
+  documentFromCanvasJson,
   getActiveDocument,
-
-  planCanvasApply,
-
-  resolveDesignDocument,
-
+  latestHostRevisionAfter,
   persistCanvasScreenshot,
-
-  screenshotResultForLog,
-
+  replayHostDesignRuns,
+  resolveDesignDocument,
   setActiveDocument,
-
+  takeFreshHostSceneRuns,
+  understandPicturePaths,
+  writeCliCanvasJson,
 } from "./designTools";
-
-import { snapshotDesignDoc } from "../../../design/journal-snapshot";
-
 import { useEditor } from "../../context";
-
-import * as fabric from "fabric";
-
-import { isBgImage } from "../../lib/background-image";
-
-import { postDesignJournal } from "../../lib/design-journal";
-
-import { readObjectId } from "../../lib/object-identity";
 import { designSelectionIds } from "../../lib/design-selection";
+import { selectedCanvasObjects } from "../../lib/object-style";
+import { canvasToScreenshotDataUrl } from "../../lib/export-png";
+import { pictureUnderstandPath } from "../../../design/upload-paths";
+import type { ToolRunRecord } from "./types";
 
-import { resolveUploadKey } from "../../../design/upload-paths";
-
-
-
-function runOk(result: unknown): boolean {
-
-  return !!(result && typeof result === "object" && (result as { ok?: boolean }).ok !== false);
-
+async function putAgentToolSession(body: Record<string, unknown>) {
+  try {
+    await fetch("/api/agent-tools/session", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    /* heartbeat is best-effort; the next send retries */
+  }
 }
 
-
-
-/** Sidebar chat — one design brief (tools + scene + selection); host runs emitted tool_calls. */
-
+/** Sidebar chat — scene brief only. Tanit owns the tool loop. */
 export function ChatPanel() {
-
-  const {
-
-    applyDesignDocument,
-
-    patchDesignOnCanvas,
-
-    scheduleSave,
-
-    selectedObject,
-
-    activePage,
-
-    activeDesign,
-
-    getCanvasJSON,
-
-    captureCanvasScreenshot,
-
-  } = useEditor();
-
+  const editor = useEditor();
+  const { selectedObject, selectionEpoch, canvas, activePage, activeDesign, getCanvasJSON } = editor;
   const engine = useChatEngine("opend");
+  const projectRootRef = useRef("");
+  const editorRef = useRef(editor);
+  editorRef.current = editor;
 
-  const resolveDoc = () =>
+  useEffect(() => {
+    void fetch("/api/meta")
+      .then((res) => (res.ok ? res.json() : {}))
+      .then((meta: { project?: string }) => {
+        if (typeof meta.project === "string" && meta.project.trim()) {
+          projectRootRef.current = meta.project.trim();
+        }
+      })
+      .catch(() => {});
+  }, []);
 
-    resolveDesignDocument([getActiveDocument(), getCanvasJSON(), activePage?.canvas_json]);
+  const resolveDoc = () => resolveDesignDocument([getActiveDocument(), getCanvasJSON(), activePage?.canvas_json]);
 
-  engine.designContextRef.current = () => {
-
+  const sessionPayload = () => {
+    const pages = [...(activeDesign?.pages ?? [])].sort((a, b) => a.sort_order - b.sort_order);
+    const pageIndex = pages.findIndex((p) => p.id === activePage?.id);
+    const attachments = [...engine.attachments, ...engine.messages.flatMap((m) => m.images ?? [])]
+      .filter((img) => img.src)
+      .map((img) => ({ name: img.name, src: img.src! }));
+    const objects = selectedCanvasObjects(canvas, selectedObject);
     const doc = resolveDoc();
-
-    if (!doc) return null;
-
-    return designChatBrief(doc, { selectionIds: designSelectionIds(selectedObject, doc) });
-
+    const selectionIds = doc ? designSelectionIds(objects, doc) : [];
+    const picturePaths = doc
+      ? understandPicturePaths(doc, {
+          selectionIds,
+          projectRoot: projectRootRef.current || undefined,
+          attachments,
+        })
+      : [];
+    return {
+      design: activeDesign?.id,
+      page: pageIndex >= 0 ? pageIndex + 1 : 1,
+      selectionIds,
+      selectionCount: objects.length,
+      projectRoot: projectRootRef.current || undefined,
+      attachments,
+      picturePaths,
+      screenshotPath: undefined as string | undefined,
+    };
   };
 
-  engine.runDesignToolsRef.current = async (text, ctx: DesignToolRunContext) => {
-
-    const resolvedBefore = resolveDoc();
-
-    const docBefore = snapshotDesignDoc(resolvedBefore);
-
-    let selectionId = resolvedBefore
-      ? designSelectionIds(selectedObject, resolvedBefore)[0]
-      : readObjectId(selectedObject) || undefined;
-
-    let selectionSrcKey: string | undefined;
-
-    if (selectedObject instanceof fabric.FabricImage && !isBgImage(selectedObject)) {
-
-      const src =
-
-        (typeof selectedObject.getSrc === "function" ? selectedObject.getSrc() : "") ||
-
-        ((selectedObject.getElement() as { src?: string } | null)?.src ?? "");
-
-      if (src) selectionSrcKey = resolveUploadKey(src);
-
-    }
-
-
-
-    postDesignJournal({
-
-      phase: "parse",
-
-      sessionId: ctx.sessionId,
-
-      messageId: ctx.messageId,
-
-      designId: activeDesign?.id,
-
-      pageId: activePage?.id,
-
-      selection: selectionId ? { id: selectionId, srcKey: selectionSrcKey } : undefined,
-
-      stream: {
-
-        chars: text.length,
-
-        finishReason: ctx.finishReason,
-
-        textTail: text.slice(-400),
-
-      },
-
-      parsed: ctx.parsedCalls.map((c) => ({ name: c.name, arguments: c.arguments })),
-
-      docBefore,
-
-      notes:
-
-        ctx.jsonObjectCount > 1
-
-          ? [`${ctx.jsonObjectCount} JSON blobs in reply — ran parsed design_* batch`]
-
-          : undefined,
-
-    });
-
-
-
-    let doc = resolveDoc();
-
-    let dirty = false;
-
-    const mediaRuns = await applyEmittedMediaTools(text, doc, {
-
-      selection: selectionId ? { id: selectionId, srcKey: selectionSrcKey } : undefined,
-
-      onDocChange: (next) => {
-
-        doc = next;
-
-        dirty = true;
-
-      },
-
-    });
-
-    const designRuns = await applyEmittedDesignTools(text, doc, {
-
-      onChange: (next) => {
-
-        doc = next;
-
-        dirty = true;
-
-      },
-
-    });
-
-    const rawRuns = [
-
-      ...mediaRuns.map((row) => ({ name: row.name, result: row.result })),
-
-      ...designRuns,
-
-    ];
-
-    const allRuns: Array<{ name: string; result: unknown }> = [];
-
-    for (const row of rawRuns) {
-
-      const pending = row.result && typeof row.result === "object" && (row.result as { pending?: string }).pending === "canvas";
-
-      if (!pending && row.name !== "design_screenshot") {
-
-        allRuns.push(row);
-
-        continue;
-
-      }
-
-      allRuns.push({ name: row.name, result: await persistCanvasScreenshot(captureCanvasScreenshot()) });
-
-    }
-
-
-
-    postDesignJournal({
-
-      phase: "tool-run",
-
-      sessionId: ctx.sessionId,
-
-      messageId: ctx.messageId,
-
-      designId: activeDesign?.id,
-
-      pageId: activePage?.id,
-
-      ran: allRuns.map((row) => ({
-
-        name: row.name,
-
-        ok: runOk(row.result),
-
-        result: screenshotResultForLog(row.name, row.result),
-
-      })),
-
-      docAfter: snapshotDesignDoc(doc),
-
-    });
-
-
-
-    if (dirty && doc) {
-
-      setActiveDocument(doc);
-
-      const plan = planCanvasApply(allRuns);
-
-      const journalBase = {
-
-        sessionId: ctx.sessionId,
-
-        messageId: ctx.messageId,
-
-        designId: activeDesign?.id,
-
-        pageId: activePage?.id,
-
-        apply: { mode: plan.mode, plan },
-
-        docAfter: snapshotDesignDoc(doc),
-
-      };
-
-
-
+  engine.onSceneToolsRef.current = async (runs: ToolRunRecord[], seen: Set<string>) => {
+    const fresh = takeFreshHostSceneRuns(runs, seen);
+    if (!fresh.length) return;
+    const {
+      patchDesignOnCanvas,
+      applyPatchedDocument,
+      refreshFromDisk,
+      getCanvasJSON: liveJson,
+      activePage: page,
+      acceptHostRevision,
+    } = editorRef.current;
+    const doc =
+      getActiveDocument() ?? documentFromCanvasJson(liveJson() || page?.canvas_json);
+    const accept = () => {
+      const live = liveJson();
+      acceptHostRevision(
+        latestHostRevisionAfter(fresh),
+        doc && live && live !== "{}" ? writeCliCanvasJson(live, doc, { source: "agent" }) : undefined,
+      );
+    };
+    if (doc) {
+      const { plan, replayed } = replayHostDesignRuns(doc, fresh);
+      if (replayed) setActiveDocument(doc);
       if (plan.mode === "patch") {
-
         const ok = await patchDesignOnCanvas(doc, plan);
-
-        postDesignJournal({ phase: "apply", ...journalBase, apply: { mode: plan.mode, plan, patched: ok } });
-
-        // Never full-reload on a missed patch — that ungroups cards, drops live glass, and reinserts DSL ghosts.
-
-        if (!ok) console.warn("[design] in-place patch missed canvas objects", plan);
-
-        scheduleSave();
-
-      } else if (plan.mode === "full") {
-
-        await applyDesignDocument(doc);
-
-        postDesignJournal({ phase: "apply", ...journalBase });
-
-        scheduleSave();
-
-      } else {
-
-        postDesignJournal({ phase: "apply", ...journalBase, notes: ["dirty but no canvas apply"] });
-
-        scheduleSave();
-
+        if (ok) {
+          accept();
+          return;
+        }
       }
-
+      if (replayed && (await applyPatchedDocument(doc))) {
+        accept();
+        return;
+      }
     }
-
-    return allRuns;
-
+    await refreshFromDisk();
   };
+
+  engine.prepareTurnRef.current = async () => {
+    const payload = sessionPayload();
+    if (canvas) {
+      try {
+        const saved = await persistCanvasScreenshot(canvasToScreenshotDataUrl(canvas));
+        if (saved.ok) {
+          payload.screenshotPath =
+            pictureUnderstandPath(projectRootRef.current || undefined, saved.path) ?? saved.path;
+        }
+      } catch {
+        /* screenshot is best-effort; design_screenshot reports if missing */
+      }
+    }
+    await putAgentToolSession(payload);
+    return { picturePaths: payload.picturePaths };
+  };
+
+  useEffect(() => {
+    void putAgentToolSession(sessionPayload());
+  }, [activeDesign?.id, activePage?.id, selectedObject, selectionEpoch, engine.attachments.length]);
 
   return (
-
     <div class="flex flex-col h-full min-h-0 min-w-0">
-
       <ChatMessages engine={engine} />
-
     </div>
-
   );
-
 }
 
-
-
 export { ChatMessages };
-
 export default ChatPanel;
-
-

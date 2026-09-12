@@ -14,12 +14,14 @@ export function patchPageBackgroundInIr(patch: { src?: string; clear?: boolean }
 }
 
 export function imageBoundsFromFabric(img: fabric.FabricImage) {
-  const rect = img.getBoundingRect();
+  const w = Math.max(1, Math.abs((img.width || 1) * (img.scaleX || 1)));
+  const h = Math.max(1, Math.abs((img.height || 1) * (img.scaleY || 1)));
+  const tl = img.getPointByOrigin("left", "top");
   return {
-    x: Math.round(rect.left),
-    y: Math.round(rect.top),
-    w: Math.round(rect.width),
-    h: Math.round(rect.height),
+    x: Math.round(tl.x),
+    y: Math.round(tl.y),
+    w: Math.round(w),
+    h: Math.round(h),
   };
 }
 
@@ -56,20 +58,21 @@ export function syncObjectStyleInIr(obj: fabric.FabricObject) {
   if (!node || (node.type !== "shape" && node.type !== "txt" && node.type !== "icon")) return;
   const style = captureObjectStyle(obj);
   const set: Record<string, unknown> = {};
-  if (style.fill) set.fill = style.fill;
+  if (typeof style.fill === "string" && style.fill) set.fill = style.fill;
+  const shadow = style.shadow
+    ? {
+        x: style.shadow.offsetX,
+        y: style.shadow.offsetY,
+        blur: style.shadow.blur,
+        color: style.shadow.color,
+      }
+    : "none";
   if (node.type === "shape") {
     if (style.stroke != null) set.stroke = style.stroke;
     if (style.strokeWidth != null) set.strokeWidth = style.strokeWidth;
     set.glass = style.stylePreset === "glass";
     if (style.stylePreset === "glass") set.glassOptions = style.glassOptions;
-    if (style.shadow) {
-      set.shadow = {
-        x: style.shadow.offsetX,
-        y: style.shadow.offsetY,
-        blur: style.shadow.blur,
-        color: style.shadow.color,
-      };
-    }
+    set.shadow = shadow;
     if (style.cornerRadius != null) set.radius = style.cornerRadius;
   }
   if (node.type === "txt") {
@@ -77,6 +80,11 @@ export function syncObjectStyleInIr(obj: fabric.FabricObject) {
     if (style.fontFamily) set.font = style.fontFamily;
     if (style.fontWeight != null) set.weight = String(style.fontWeight);
     if (style.textAlign) set.align = style.textAlign;
+    if (style.fontStyle) set.style = style.fontStyle;
+    set.shadow = shadow;
+  }
+  if (node.type === "icon") {
+    set.shadow = shadow;
   }
   if (!Object.keys(set).length) return;
   updateObjects(doc, { patches: [{ id, set }] });

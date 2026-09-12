@@ -68,7 +68,7 @@ export function applyObjectFrame(obj: fabric.FabricObject, frame: ObjectFrame) {
       top: frame.top,
     });
   } else {
-    obj.set({ originX: "center", originY: "center" });
+    obj.set({ originX: "left", originY: "top" });
     obj.setPositionByOrigin(frame.center, "center", "center");
   }
   obj.setCoords();

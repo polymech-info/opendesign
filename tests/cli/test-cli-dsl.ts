@@ -6,6 +6,7 @@ import path from "node:path";
 import { designDslMarkdown, exportDslMarkdown, queryDesignDsl } from "../../src/cli-dsl.ts";
 import { buildFeatureCardsDocument, projectToFabricJSON } from "../../src/design/index.ts";
 import { ensureLayouts, resolveRoots } from "../../src/server/paths.ts";
+import { loadProjectGuides } from "../../src/server/project-guides.ts";
 import * as store from "../../src/server/store.ts";
 
 const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "opend-cli-dsl-"));
@@ -13,6 +14,11 @@ const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "opend-cli-dsl-"));
 try {
   const roots = resolveRoots(cwd);
   ensureLayouts(roots);
+  const guides = loadProjectGuides(cwd);
+  assert.match(String(guides.styleGuide), /1920/);
+  assert.match(String(guides.skill), /Store Chat/);
+  assert.ok(fs.existsSync(path.join(roots.project, "style_guide.md")));
+  assert.ok(fs.existsSync(path.join(roots.project, "SKILL.md")));
   const doc = buildFeatureCardsDocument();
   const design = store.createDesign(roots, {
     name: "DSL CLI Fixture",

@@ -62,7 +62,7 @@ export function screenshotFollowUpText(path: string, url?: string): string {
 export function understandFollowUpText(result: unknown): string {
   return [
     `{"name":"image_understand","result":${JSON.stringify(result ?? {})}}`,
-    "Emit design_* to edit the canvas if needed.",
+    "If the user asked what is in the picture, answer in prose using this result. Do not emit {\"tool_calls\":[]}. Emit design_* only if they asked to change the canvas.",
   ].join("\n");
 }
 

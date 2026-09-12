@@ -37,3 +37,15 @@ export function canvasToPngDataUrl(canvas: fabric.StaticCanvas, multiplier = 2):
 export function canvasToScreenshotDataUrl(canvas: fabric.StaticCanvas): string {
   return canvasToDataUrl(canvas, { format: "jpeg", multiplier: 0.5, quality: 0.72 });
 }
+
+export function dataUrlToBlob(dataURL: string): Blob {
+  const [header, data] = dataURL.split(",");
+  const mime = header?.match(/:(.*?);/)?.[1] || "image/png";
+  const bytes = Uint8Array.from(atob(data ?? ""), (ch) => ch.charCodeAt(0));
+  return new Blob([bytes], { type: mime });
+}
+
+export async function copyCanvasPngToClipboard(canvas: fabric.StaticCanvas): Promise<void> {
+  const blob = dataUrlToBlob(canvasToPngDataUrl(canvas, 2));
+  await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+}

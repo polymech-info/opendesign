@@ -8,11 +8,42 @@ import { readObjectId } from "./object-identity";
 import { lockBackgroundImage, pageLayer, removePagePhoto, stackPageBackgroundLayers } from "./background-image";
 
 async function waitForImageElement(el: HTMLImageElement | undefined): Promise<void> {
-  if (!el || el.complete) return;
+  if (!el) return;
+  if (typeof el.decode === "function") {
+    try {
+      await el.decode();
+      return;
+    } catch {
+      /* fall through to load listeners */
+    }
+  }
+  if (el.complete) return;
   await new Promise<void>((resolve) => {
-    el.onload = () => resolve();
-    el.onerror = () => resolve();
+    const done = () => resolve();
+    el.addEventListener("load", done, { once: true });
+    el.addEventListener("error", done, { once: true });
   });
+}
+
+/** Decode, then lock width/height to natural pixels so the frame matches the bitmap. */
+export async function normalizeFabricImageSize(img: fabric.FabricImage): Promise<{ width: number; height: number }> {
+  const el = img.getElement() as HTMLImageElement | undefined;
+  await waitForImageElement(el);
+  const original = typeof img.getOriginalSize === "function" ? img.getOriginalSize() : { width: 0, height: 0 };
+  const nw = Math.max(1, original.width || el?.naturalWidth || img.width || 1);
+  const nh = Math.max(1, original.height || el?.naturalHeight || img.height || 1);
+  const sized = img as fabric.FabricImage & { _sourceW?: number; _sourceH?: number };
+  sized._sourceW = nw;
+  sized._sourceH = nh;
+  img.set({
+    width: nw,
+    height: nh,
+    cropX: 0,
+    cropY: 0,
+    scaleX: 1,
+    scaleY: 1,
+  });
+  return { width: nw, height: nh };
 }
 
 export function stretchedImageFrame(
@@ -86,8 +117,13 @@ export async function hydrateDesignImages(canvas: fabric.Canvas, doc: DesignDocu
     const obj = canvas.getObjects().find((o) => (o as { _id?: string })._id === node.id);
     if (!(obj instanceof fabric.FabricImage)) continue;
     const el = obj.getElement() as HTMLImageElement | undefined;
-    const nw = Math.max(1, el?.naturalWidth || obj.width || 1);
-    const nh = Math.max(1, el?.naturalHeight || obj.height || 1);
+    await waitForImageElement(el);
+    const original = typeof obj.getOriginalSize === "function" ? obj.getOriginalSize() : { width: 0, height: 0 };
+    const nw = Math.max(1, original.width || el?.naturalWidth || obj.width || 1);
+    const nh = Math.max(1, original.height || el?.naturalHeight || obj.height || 1);
+    const sized = obj as fabric.FabricImage & { _sourceW?: number; _sourceH?: number };
+    sized._sourceW = nw;
+    sized._sourceH = nh;
     obj.set({
       originX: "left",
       originY: "top",
@@ -95,6 +131,8 @@ export async function hydrateDesignImages(canvas: fabric.Canvas, doc: DesignDocu
       top: node.bounds.y,
       width: nw,
       height: nh,
+      cropX: 0,
+      cropY: 0,
       scaleX: node.bounds.w / nw,
       scaleY: node.bounds.h / nh,
     });
@@ -113,6 +151,7 @@ export async function patchFabricImageSrc(
   const style = captureObjectStyle(obj);
   const radius = readImageCornerRadius(obj);
   const next = await fabric.FabricImage.fromURL(url, { crossOrigin: "anonymous" });
+  await normalizeFabricImageSize(next);
   next.set({
     originX: obj.originX,
     originY: obj.originY,

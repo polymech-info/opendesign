@@ -14,7 +14,8 @@ import { listenHono } from "./server/listen.js";
 import { resolveRoots } from "./server/paths.js";
 import { mountClient } from "./server/serve-client.js";
 import { devPortFile } from "./server/dev-port.js";
-import { ensureLlmServer } from "./server/llm.js";
+import { HOST_TOOL_PROVIDER_ID } from "./server/agent-tools.js";
+import { ensureLlmServer, registerHostToolProvider } from "./server/llm.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const runningFromSource = path.basename(here) === "src";
@@ -81,6 +82,7 @@ const HELP = `
     dsl [id|name]         Export Design DSL as a Markdown file
     query [id|name] EXPR  Query Design DSL and print JSON
     prompt [id|name] TEXT Prompt the design agent and save its edits
+    mcp                   MCP stdio server (Cursor / Claude Desktop)
     ls                    List designs in this folder
 
   Options:
@@ -120,6 +122,7 @@ const commandName = rest.find(
     a === "dsl" ||
     a === "query" ||
     a === "prompt" ||
+    a === "mcp" ||
     a === "ls" ||
     a === "list",
 );
@@ -197,6 +200,12 @@ try {
     process.exit(0);
   }
 
+  if (commandName === "mcp") {
+    const { runMcpStdio } = await import("./mcp/stdio.js");
+    await runMcpStdio({ cwd: targetDir, searchFrom: pkgRoot });
+    process.exit(0);
+  }
+
   if (commandName === "prompt") {
     const query = rest[commandAt + 1];
     const prompt = str("-p", "--prompt") ?? rest.slice(commandAt + 2).join(" ");
@@ -238,7 +247,11 @@ const noBrowser =
   flags.has("--no-browser") || process.env.OPEND_NO_BROWSER === "1" || runningFromSource;
 
 const roots = resolveRoots(targetDir);
-const llm = await ensureLlmServer({ cwd: roots.project, searchFrom: pkgRoot });
+const hostToolProvider = {
+  id: HOST_TOOL_PROVIDER_ID,
+  url: `http://127.0.0.1:${Number.isFinite(preferredPort) ? preferredPort : DEFAULT_API_PORT}/api/agent-tools`,
+};
+const llm = await ensureLlmServer({ cwd: roots.project, searchFrom: pkgRoot, hostToolProvider });
 const app = createOpenDesignApp({ roots, iconDir, llm });
 
 if (!runningFromSource && fs.existsSync(clientDir)) {
@@ -247,6 +260,10 @@ if (!runningFromSource && fs.existsSync(clientDir)) {
 
 const { port } = await listenHono(app.fetch, preferredPort, { allowFallback: true });
 fs.writeFileSync(portFile, JSON.stringify({ api: port }) + "\n");
+await registerHostToolProvider(llm, {
+  id: HOST_TOOL_PROVIDER_ID,
+  url: `http://127.0.0.1:${port}/api/agent-tools`,
+});
 
 const uiPort = Number(process.env.OPEND_UI_PORT || DEFAULT_UI_PORT);
 const ui = runningFromSource ? `http://127.0.0.1:${uiPort}` : `http://127.0.0.1:${port}`;

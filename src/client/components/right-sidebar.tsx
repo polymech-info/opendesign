@@ -526,6 +526,8 @@ export function RightSidebar() {
     setBackground,
     canvasWidth,
     canvasHeight,
+    activeDesign,
+    renameDesign,
     addImageFromClipboard,
     lockSelectedAsBackground,
     replaceSelectedIcon,
@@ -555,6 +557,25 @@ export function RightSidebar() {
           <h2 class="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Canvas</h2>
         </div>
         <div class="p-4 flex flex-col gap-3">
+          <div>
+            <label class="text-[11px] text-zinc-400 mb-1 block">Title</label>
+            <input
+              key={activeDesign?.id ?? "title"}
+              type="text"
+              class="w-full bg-white border border-zinc-300 rounded-md text-xs text-zinc-700 px-2 py-1.5 outline-none focus:border-accent"
+              defaultValue={activeDesign?.name ?? ""}
+              placeholder="Untitled Design"
+              disabled={!activeDesign}
+              onBlur={(e) => {
+                if (!activeDesign) return;
+                const name = (e.target as HTMLInputElement).value.trim();
+                if (name && name !== activeDesign.name) void renameDesign(activeDesign.id, name);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+              }}
+            />
+          </div>
           <div class="flex items-center justify-between">
             <span class="text-[11px] text-zinc-400">Dimensions</span>
             <span class="text-[11px] text-zinc-600 font-mono">{canvasWidth} x {canvasHeight}</span>
@@ -938,6 +959,7 @@ export function RightSidebar() {
                 }
               />
             </div>
+            <ShadowFields obj={selectedObject} onChange={updateSelectedObject} />
           </>
         )}
 
@@ -1184,7 +1206,7 @@ export function RightSidebar() {
         {isImage && (
           <>
             <p class="text-[10px] text-zinc-400 m-0">
-              Shift-drag to pan the crop. Shift-drag a corner to zoom inside the frame.
+              Shift-drag to pan the crop. Shift-drag a corner to zoom inside the frame. Shift-drag a side handle to clip without stretching.
             </p>
             {isCroppableImage(selectedObject) && (
               <ImageCropFields obj={selectedObject} onCommit={() => updateSelectedObject({})} />

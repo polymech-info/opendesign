@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import * as fabric from "fabric";
 
-import { panImageCrop, readImageCrop, resetImageCrop, setImageCropZoom, zoomImageCrop } from "../../src/client/lib/image-crop.ts";
+import { clipImageCrop, panImageCrop, readImageCrop, resetImageCrop, setImageCropZoom, zoomImageCrop } from "../../src/client/lib/image-crop.ts";
 
 const img = new fabric.FabricImage(null, {
   width: 1000,
@@ -41,5 +41,24 @@ assert.ok(readImageCrop(img).zoom > 2);
 resetImageCrop(img);
 assert.equal(Math.round(readImageCrop(img).zoom), 1);
 assert.equal(Math.round((img.width || 0) * Math.abs(img.scaleX || 1)), Math.round(frameW));
+
+const clipStart = {
+  cropX: img.cropX || 0,
+  cropY: img.cropY || 0,
+  width: img.width || 1,
+  height: img.height || 1,
+  scaleX: img.scaleX || 1,
+  scaleY: img.scaleY || 1,
+};
+const right = (img.left || 0) + (img.width || 0) * Math.abs(img.scaleX || 1);
+clipImageCrop(img, "ml", 40, 0, clipStart);
+assert.equal(img.scaleX, clipStart.scaleX, "mid-handle clip must not stretch");
+assert.equal(img.scaleY, clipStart.scaleY, "mid-handle clip must not stretch");
+assert.ok((img.width || 0) < clipStart.width, "dragging the left handle inward clips source width");
+assert.equal(
+  Math.round((img.left || 0) + (img.width || 0) * Math.abs(img.scaleX || 1)),
+  Math.round(right),
+  "clipping from the left keeps the right edge pinned"
+);
 
 console.log("test:image-crop PASS");

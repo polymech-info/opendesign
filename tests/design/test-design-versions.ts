@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { buildFeatureCardsDocument, projectToFabricJSON } from "../../src/design/index.ts";
+import { buildFeatureCardsDocument, designNeedsThumbnail, projectToFabricJSON } from "../../src/design/index.ts";
 import { ensureLayouts, resolveRoots } from "../../src/server/paths.ts";
 import * as store from "../../src/server/store.ts";
 
@@ -73,6 +73,18 @@ try {
   assert.equal(store.getDesign(roots, created.id)?.name, liveName);
   assert.equal(store.getDesign(roots, created.id)?.canvas_json.includes("_probe"), false);
   assert.ok(store.readVersion(roots, created.id, 1)?.canvas_json.includes("_probe"));
+
+  assert.equal(designNeedsThumbnail(created), true);
+  const beforeThumb = store.getDesign(roots, created.id)!;
+  const stamped = store.setDesignThumbnail(roots, created.id, "/api/uploads/file/uploads/thumbs/x.jpg");
+  assert.equal(stamped?.thumbnail_url, "/api/uploads/file/uploads/thumbs/x.jpg");
+  assert.equal(stamped?.thumbnail_at, beforeThumb.updated_at);
+  assert.equal(stamped?.updated_at, beforeThumb.updated_at);
+  assert.equal(designNeedsThumbnail(stamped!), false);
+  store.updateDesign(roots, created.id, { name: "After thumb" });
+  const afterEdit = store.getDesign(roots, created.id)!;
+  assert.equal(designNeedsThumbnail(afterEdit), true);
+  assert.notEqual(afterEdit.updated_at, afterEdit.thumbnail_at);
 
   store.deleteDesign(roots, created.id);
   assert.equal(fs.existsSync(path.join(roots.project, "designs", `${created.id}.json`)), false);

@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from "preact/hooks";
 import * as fabric from "fabric";
 import { loadFabricJSON } from "../lib/fabric-json";
-import { canvasToPngDataUrl, canvasToScreenshotDataUrl } from "../lib/export-png";
+import { canvasToPngDataUrl, canvasToScreenshotDataUrl, copyCanvasPngToClipboard } from "../lib/export-png";
 import { imageBlobFromClipboard, saveClipboardImageToUploads } from "../lib/clipboard-image";
 import { uploadImageFile, isSvgFile, isSvgUrl } from "../lib/file-drop";
 import {
@@ -68,8 +68,9 @@ import {
   projectToFabricJSON,
   validateFabricProjection,
 } from "../../design/project";
+import { writeCliCanvasJson } from "../../design/patch-fabric-json";
 import { hydrateDesignIconFills } from "../lib/design-icons";
-import { hydrateDesignImages, hydratePageBackground, patchFabricImageSrc, patchPageBackgroundSrc } from "../lib/design-images";
+import { hydrateDesignImages, hydratePageBackground, normalizeFabricImageSize, patchFabricImageSrc, patchPageBackgroundSrc } from "../lib/design-images";
 import { syncDesignNodesToCanvas } from "../lib/design-style-sync";
 import type { CanvasPatchPlan } from "../../design/apply-plan";
 import { getActiveDocument, setActiveDocument } from "../../design/tools";
@@ -506,22 +507,23 @@ export function useCanvasState() {
       }
       try {
         const img = await fabric.FabricImage.fromURL(url, { crossOrigin: "anonymous" });
-        const el = img.getElement() as { naturalWidth?: number; naturalHeight?: number } | null;
-        const nw = Math.max(1, el?.naturalWidth || img.width || 1);
-        const nh = Math.max(1, el?.naturalHeight || img.height || 1);
-        img.set({ width: nw, height: nh, scaleX: 1, scaleY: 1 });
+        const { width: nw, height: nh } = await normalizeFabricImageSize(img);
         const maxFit = opts?.fit ?? 0.6;
         const scale = Math.min((canvasWidth * maxFit) / nw, (canvasHeight * maxFit) / nh, 1);
+        const displayW = nw * scale;
+        const displayH = nh * scale;
         img.set({
-          originX: "center",
-          originY: "center",
-          left,
-          top,
+          originX: "left",
+          originY: "top",
+          left: left - displayW / 2,
+          top: top - displayH / 2,
           scaleX: scale,
           scaleY: scale,
           uniformScaling: true,
+          lockScalingFlip: true,
         });
         applyImageCornerRadius(img, IMAGE_CORNER_RADIUS_DEFAULT);
+        img.setCoords();
         canvas.add(img);
         ensureObjectIdentity(img, canvas);
         syncImageNodeInIr(img);
@@ -575,6 +577,7 @@ export function useCanvasState() {
       if (!(selectedObject instanceof fabric.FabricImage) || isBgImage(selectedObject)) return;
       try {
         const img = await fabric.FabricImage.fromURL(url, { crossOrigin: "anonymous" });
+        await normalizeFabricImageSize(img);
         const style = captureObjectStyle(selectedObject);
         const radius = readImageCornerRadius(selectedObject);
         applyObjectStyle(img, style);
@@ -822,6 +825,7 @@ export function useCanvasState() {
     if (!style || !canvas || !pageId || targets.length === 0) return;
     for (const obj of targets) {
       applyObjectStyle(obj, style);
+      syncObjectStyleInIr(obj);
       obj.setCoords();
     }
     canvas.requestRenderAll();
@@ -1021,22 +1025,51 @@ export function useCanvasState() {
     return dataURL;
   }, [getActiveCanvas]);
 
-  const exportPNG = useCallback(() => {
+  const exportPNG = useCallback(
+    async (opts?: { toProject?: boolean; name?: string }) => {
+      const canvas = getActiveCanvas();
+      if (!canvas) return null;
+      const activeObj = canvas.getActiveObject();
+      canvas.discardActiveObject();
+      const dataURL = canvasToPngDataUrl(canvas, 2);
+      if (activeObj) {
+        canvas.setActiveObject(activeObj);
+        canvas.requestRenderAll();
+      }
+      if (opts?.toProject) {
+        return api<{ path: string; filename: string; relative: string }>("POST", "/api/export/png", {
+          name: opts.name || "design",
+          image: dataURL,
+        });
+      }
+      const slug = (opts?.name || "design")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "") || "design";
+      const link = document.createElement("a");
+      link.download = `${slug}.png`;
+      link.href = dataURL;
+      link.click();
+      return null;
+    },
+    [getActiveCanvas]
+  );
+
+  const copyDesignToClipboard = useCallback(async (): Promise<boolean> => {
     const canvas = getActiveCanvas();
-    if (!canvas) return;
+    if (!canvas) return false;
     const activeObj = canvas.getActiveObject();
     canvas.discardActiveObject();
-
-    const dataURL = canvasToPngDataUrl(canvas, 2);
-
-    const link = document.createElement("a");
-    link.download = "design.png";
-    link.href = dataURL;
-    link.click();
-
-    if (activeObj) {
-      canvas.setActiveObject(activeObj);
-      canvas.requestRenderAll();
+    try {
+      await copyCanvasPngToClipboard(canvas);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      if (activeObj) {
+        canvas.setActiveObject(activeObj);
+        canvas.requestRenderAll();
+      }
     }
   }, [getActiveCanvas]);
 
@@ -1137,6 +1170,43 @@ export function useCanvasState() {
       saveHistory(pageId);
     },
     [getActiveCanvas, saveHistory, canvasWidth, canvasHeight],
+  );
+
+  /** Keep editor groups: patch the live Fabric JSON from IR (create / delete / use_widget). */
+  const applyPatchedDocument = useCallback(
+    async (doc: DesignDocument): Promise<boolean> => {
+      const canvas = getActiveCanvas();
+      const pageId = activeCanvasIdRef.current;
+      if (!canvas || !pageId) {
+        console.warn("[design] applyPatchedDocument skipped — no active canvas", { pageId });
+        return false;
+      }
+      setActiveDocument(doc);
+      const fabricJson = writeCliCanvasJson(canvasHistoryJSON(canvas), doc, { source: "agent" });
+      isRestoringRef.current.add(pageId);
+      try {
+        await loadFabricJSON(canvas, fabricJson);
+        await hydratePageBackground(canvas, canvasWidth, canvasHeight);
+        canvas.getObjects().forEach((o) => {
+          if (o.shadow) {
+            o.objectCaching = false;
+            o.dirty = true;
+          }
+        });
+        await hydrateDesignIconFills(canvas, doc);
+        await hydrateDesignImages(canvas, doc);
+        canvas.discardActiveObject();
+        canvas.requestRenderAll();
+        setSelectedObject(null);
+        setSelectionEpoch((n) => n + 1);
+        setLayersEpoch((n) => n + 1);
+      } finally {
+        isRestoringRef.current.delete(pageId);
+      }
+      saveHistory(pageId);
+      return true;
+    },
+    [getActiveCanvas, canvasHistoryJSON, saveHistory, canvasWidth, canvasHeight],
   );
 
   const loadTemplate = useCallback(
@@ -1431,9 +1501,11 @@ export function useCanvasState() {
     zoomOut,
     captureCanvasScreenshot,
     exportPNG,
+    copyDesignToClipboard,
     getCanvasJSON,
     getCanvasJSONForPage,
     applyDesignDocument,
+    applyPatchedDocument,
     patchDesignOnCanvas,
     loadTemplate,
     layersEpoch,

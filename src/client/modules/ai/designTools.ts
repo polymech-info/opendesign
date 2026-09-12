@@ -1,4 +1,9 @@
-export { applyEmittedMediaTools } from "../../../design/media-tools";
+export {
+  applyEmittedMediaTools,
+  isMediaWriteTool,
+  outputPathFromToolResult,
+  pathToolFailed,
+} from "../../../design/media-tools";
 
 export {
 
@@ -48,8 +53,17 @@ export {
 
 } from "../../../design/chat-feedback";
 
-export { designChatBrief } from "../../../design/brief";
+export { designChatBrief, understandPicturePaths, type ProjectGuides } from "../../../design/brief";
 export { planCanvasApply } from "../../../design/apply-plan";
+export {
+  hostToolRunNeedsSceneRefresh,
+  hostToolRunsNeedSceneRefresh,
+  hostToolSceneKey,
+  latestHostRevisionAfter,
+  replayHostDesignRuns,
+  takeFreshHostSceneRuns,
+} from "../../../design/apply-host-scene";
+export { writeCliCanvasJson } from "../../../design/patch-fabric-json";
 export { persistCanvasScreenshot, toolFollowUpFromRuns } from "../../../design/screenshot";
 
 export {

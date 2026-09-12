@@ -18,8 +18,13 @@ function turnSummary(runs: ToolRunRecord[]): string {
   return `${runs.length} tools`;
 }
 
+function resultPending(result: unknown): boolean {
+  return Boolean(result && typeof result === "object" && (result as { pending?: boolean }).pending);
+}
+
 function resultOk(result: unknown): boolean {
   if (!result || typeof result !== "object") return true;
+  if (resultPending(result)) return true;
   return (result as Record<string, unknown>).ok !== false;
 }
 
@@ -59,7 +64,9 @@ export function ToolCallsPanel({ runs }: { runs: ToolRunRecord[] }) {
                 </pre>
               </div>
               <div>
-                <div class="text-[9px] uppercase tracking-wide text-zinc-400 mb-0.5">result</div>
+                <div class="text-[9px] uppercase tracking-wide text-zinc-400 mb-0.5">
+                  {resultPending(run.result) ? "running" : "result"}
+                </div>
                 <pre
                   class={`m-0 p-1.5 rounded border text-[9px] leading-snug overflow-x-auto max-h-36 overflow-y-auto whitespace-pre-wrap break-all ${
                     resultOk(run.result)

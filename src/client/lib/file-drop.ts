@@ -46,19 +46,26 @@ export function imageFilesFromDataTransfer(dt: DataTransfer | null | undefined):
   return out;
 }
 
-export async function uploadImageFile(file: File, kind: UploadKind = "images"): Promise<string | null> {
+export type UploadedImage = { url: string; key: string };
+
+export async function uploadImageFileMeta(file: File, kind: UploadKind = "images"): Promise<UploadedImage | null> {
   const form = new FormData();
   form.append("file", file);
   form.append("kind", kind);
   try {
     const resp = await fetch("/api/uploads", { method: "POST", body: form });
-    const data = await resp.json();
-    if (data.url) {
+    const data = (await resp.json()) as { url?: string; key?: string };
+    if (data.url && data.key) {
       window.dispatchEvent(new Event("opend-uploads-changed"));
-      return data.url as string;
+      return { url: data.url, key: data.key };
     }
   } catch (e) {
     console.error("Upload failed:", e);
   }
   return null;
+}
+
+export async function uploadImageFile(file: File, kind: UploadKind = "images"): Promise<string | null> {
+  const uploaded = await uploadImageFileMeta(file, kind);
+  return uploaded?.url ?? null;
 }
