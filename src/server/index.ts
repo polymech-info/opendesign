@@ -20,9 +20,11 @@ import {
   getUpload,
   listUploads,
   putUpload,
+  putUploadKey,
   type UploadKind,
 } from "./uploads.js";
 import { mountLlmProxy, type LlmTarget } from "./llm.js";
+import { appendDesignJournal, readDesignJournal } from "./design-journal.js";
 
 export type AppOptions = {
   roots: Roots;
@@ -39,7 +41,29 @@ const DesignSchema = z.object({
   thumbnail_url: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
+  updated_by: z.enum(["editor", "cli"]).optional(),
   source: z.string().optional(),
+});
+
+const DesignRevisionSchema = z.object({
+  id: z.string(),
+  updated_at: z.string(),
+  updated_by: z.enum(["editor", "cli"]).optional(),
+});
+
+const DesignVersionMetaSchema = z.object({
+  id: z.string(),
+  design_id: z.string(),
+  rev: z.number(),
+  kind: z.enum(["auto", "manual"]),
+  title: z.string(),
+  description: z.string(),
+  created_at: z.string(),
+  created_by: z.enum(["editor", "cli"]),
+  content_hash: z.string(),
+  name: z.string(),
+  width: z.number(),
+  height: z.number(),
 });
 
 const TemplateSchema = z.object({
@@ -61,6 +85,12 @@ const PageSchema = z.object({
   canvas_json: z.string(),
   sort_order: z.number(),
   created_at: z.string(),
+});
+
+const DesignVersionDetailSchema = DesignVersionMetaSchema.extend({
+  canvas_json: z.string(),
+  thumbnail_url: z.string().nullable().optional(),
+  pages: z.array(PageSchema),
 });
 
 const DesignWithPagesSchema = DesignSchema.extend({
@@ -151,6 +181,10 @@ Lists MERGE both folders (union). Same id/filename: project copy is used; unique
 ## API
 - GET /api/meta
 - GET/POST /api/designs
+- GET /api/designs/{id}/revision
+- GET/POST /api/designs/{id}/versions
+- DELETE /api/designs/{id}/versions/{rev}
+- POST /api/designs/{id}/versions/{rev}/restore
 - GET/PUT/DELETE /api/designs/{id}
 - POST /api/designs/{id}/pages
 - PUT/DELETE /api/pages/{pageId}
@@ -167,6 +201,8 @@ Lists MERGE both folders (union). Same id/filename: project copy is used; unique
 - POST /api/icons/download
 - GET /api/openapi.json
 - ALL /api/llm/*  (proxy to tanit-cli llm agent --serve)
+- POST /api/path-tools/call  (image_create / image_transform / image_understand → tanit path-tools)
+- GET/POST /api/design/journal  (append/read design tool apply log — .OpenDesign/journal/design-changes.jsonl)
 `)
   );
 
@@ -189,6 +225,155 @@ Lists MERGE both folders (union). Same id/filename: project copy is used; unique
   app.openapi(getDesign, (c) => {
     const { id } = c.req.valid("param");
     const row = store.getDesign(roots, id);
+    if (!row) return c.json({ error: "Not found" }, 404);
+    return c.json(row, 200);
+  });
+
+  const getDesignRevision = createRoute({
+    method: "get",
+    path: "/api/designs/{id}/revision",
+    request: { params: z.object({ id: z.string() }) },
+    responses: {
+      200: { content: { "application/json": { schema: DesignRevisionSchema } }, description: "OK" },
+      404: { content: { "application/json": { schema: ErrorSchema } }, description: "Not found" },
+    },
+  });
+  app.openapi(getDesignRevision, (c) => {
+    const { id } = c.req.valid("param");
+    const row = store.getDesignRevision(roots, id);
+    if (!row) return c.json({ error: "Not found" }, 404);
+    return c.json(row, 200);
+  });
+
+  const listVersions = createRoute({
+    method: "get",
+    path: "/api/designs/{id}/versions",
+    request: { params: z.object({ id: z.string() }) },
+    responses: {
+      200: { content: { "application/json": { schema: z.array(DesignVersionMetaSchema) } }, description: "OK" },
+      404: { content: { "application/json": { schema: ErrorSchema } }, description: "Not found" },
+    },
+  });
+  app.openapi(listVersions, (c) => {
+    const { id } = c.req.valid("param");
+    if (!store.getDesign(roots, id)) return c.json({ error: "Not found" }, 404);
+    return c.json(store.listVersions(roots, id), 200);
+  });
+
+  const createVersion = createRoute({
+    method: "post",
+    path: "/api/designs/{id}/versions",
+    request: {
+      params: z.object({ id: z.string() }),
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              kind: z.enum(["auto", "manual"]).optional(),
+              title: z.string().optional(),
+              description: z.string().optional(),
+              created_by: z.enum(["editor", "cli"]).optional(),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      200: {
+        content: {
+          "application/json": {
+            schema: z.object({ version: DesignVersionMetaSchema, created: z.boolean() }),
+          },
+        },
+        description: "OK",
+      },
+      404: { content: { "application/json": { schema: ErrorSchema } }, description: "Not found" },
+    },
+  });
+  app.openapi(createVersion, (c) => {
+    const { id } = c.req.valid("param");
+    const body = c.req.valid("json");
+    const result = store.snapshotDesignVersion(roots, id, {
+      kind: body.kind ?? "manual",
+      title: body.title,
+      description: body.description,
+      created_by: body.created_by ?? "editor",
+    });
+    if (!result) return c.json({ error: "Not found" }, 404);
+    return c.json(result, 200);
+  });
+
+  const getVersion = createRoute({
+    method: "get",
+    path: "/api/designs/{id}/versions/{rev}",
+    request: { params: z.object({ id: z.string(), rev: z.coerce.number().int().positive() }) },
+    responses: {
+      200: { content: { "application/json": { schema: DesignVersionDetailSchema } }, description: "OK" },
+      404: { content: { "application/json": { schema: ErrorSchema } }, description: "Not found" },
+    },
+  });
+  app.openapi(getVersion, (c) => {
+    const { id, rev } = c.req.valid("param");
+    const row = store.readVersion(roots, id, rev);
+    if (!row) return c.json({ error: "Not found" }, 404);
+    return c.json(row, 200);
+  });
+
+  const updateVersion = createRoute({
+    method: "put",
+    path: "/api/designs/{id}/versions/{rev}",
+    request: {
+      params: z.object({ id: z.string(), rev: z.coerce.number().int().positive() }),
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              canvas_json: z.string().optional(),
+              pages: z.array(z.object({ id: z.string(), canvas_json: z.string() })).optional(),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      200: { content: { "application/json": { schema: DesignVersionDetailSchema } }, description: "OK" },
+      404: { content: { "application/json": { schema: ErrorSchema } }, description: "Not found" },
+    },
+  });
+  app.openapi(updateVersion, (c) => {
+    const { id, rev } = c.req.valid("param");
+    const row = store.writeVersion(roots, id, rev, c.req.valid("json"));
+    if (!row) return c.json({ error: "Not found" }, 404);
+    return c.json(row, 200);
+  });
+
+  const deleteVersion = createRoute({
+    method: "delete",
+    path: "/api/designs/{id}/versions/{rev}",
+    request: { params: z.object({ id: z.string(), rev: z.coerce.number().int().positive() }) },
+    responses: {
+      200: { content: { "application/json": { schema: z.object({ ok: z.boolean() }) } }, description: "OK" },
+      404: { content: { "application/json": { schema: ErrorSchema } }, description: "Not found" },
+    },
+  });
+  app.openapi(deleteVersion, (c) => {
+    const { id, rev } = c.req.valid("param");
+    if (!store.removeDesignVersion(roots, id, rev)) return c.json({ error: "Not found" }, 404);
+    return c.json({ ok: true }, 200);
+  });
+
+  const restoreVersion = createRoute({
+    method: "post",
+    path: "/api/designs/{id}/versions/{rev}/restore",
+    request: { params: z.object({ id: z.string(), rev: z.coerce.number().int().positive() }) },
+    responses: {
+      200: { content: { "application/json": { schema: DesignWithPagesSchema } }, description: "OK" },
+      404: { content: { "application/json": { schema: ErrorSchema } }, description: "Not found" },
+    },
+  });
+  app.openapi(restoreVersion, (c) => {
+    const { id, rev } = c.req.valid("param");
+    const row = store.restoreVersion(roots, id, rev, "editor");
     if (!row) return c.json({ error: "Not found" }, 404);
     return c.json(row, 200);
   });
@@ -433,8 +618,16 @@ Lists MERGE both folders (union). Same id/filename: project copy is used; unique
     const allowed = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg"]);
     if (!allowed.has(ext)) return c.json({ error: "Unsupported file type" }, 400);
     const kind: UploadKind =
-      body["kind"] === "backgrounds" ? "backgrounds" : body["kind"] === "icons" ? "icons" : "images";
-    const filename = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
+      body["kind"] === "backgrounds"
+        ? "backgrounds"
+        : body["kind"] === "icons"
+          ? "icons"
+          : body["kind"] === "screenshots"
+            ? "screenshots"
+            : "images";
+    const requestedKey = typeof body["key"] === "string" ? body["key"].trim() : "";
+    const requestedName = typeof body["filename"] === "string" ? body["filename"].trim() : "";
+    const filename = requestedName || `${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
     const data = await file.arrayBuffer();
     const mime =
       ext === "jpg" || ext === "jpeg"
@@ -446,6 +639,13 @@ Lists MERGE both folders (union). Same id/filename: project copy is used; unique
             : ext === "svg"
               ? "image/svg+xml"
               : "image/png";
+    if (requestedKey.startsWith("uploads/")) {
+      try {
+        return c.json(putUploadKey(roots, requestedKey, data, "project"), 200);
+      } catch (err) {
+        return c.json({ error: err instanceof Error ? err.message : "Invalid upload key" }, 400);
+      }
+    }
     return c.json(putUpload(roots, kind, filename, data, mime, "project"), 200);
   });
 
@@ -481,6 +681,18 @@ Lists MERGE both folders (union). Same id/filename: project copy is used; unique
   app.delete("/api/elements/:id", (c) => {
     store.deleteElement(roots, c.req.param("id"));
     return c.json({ ok: true }, 200);
+  });
+
+  app.get("/api/design/journal", (c) => {
+    const limit = Math.min(500, Math.max(1, Number(c.req.query("limit") || 80)));
+    return c.json({ entries: readDesignJournal(roots, limit) }, 200);
+  });
+
+  app.post("/api/design/journal", async (c) => {
+    const body = await c.req.json().catch(() => null);
+    if (!body || typeof body !== "object") return c.json({ error: "Invalid body" }, 400);
+    const entry = appendDesignJournal(roots, body as Parameters<typeof appendDesignJournal>[1]);
+    return c.json({ ok: true, id: entry.id, ts: entry.ts }, 200);
   });
 
   app.doc("/api/openapi.json", {

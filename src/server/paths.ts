@@ -45,7 +45,16 @@ export function mergeOrder(roots: Roots): { layer: Layer; root: string }[] {
   ];
 }
 
-const SUBDIRS = ["designs", "elements", "templates", "uploads", "uploads/backgrounds", "uploads/icons"];
+const SUBDIRS = [
+  "designs",
+  "elements",
+  "templates",
+  "uploads",
+  "uploads/backgrounds",
+  "uploads/icons",
+  "uploads/screenshots",
+  "journal",
+];
 
 export function ensureRootLayout(root: string) {
   fs.mkdirSync(root, { recursive: true });

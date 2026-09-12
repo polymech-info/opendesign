@@ -1,9 +1,28 @@
-import type { ToolCall } from "./tools";
+import { looksTruncatedDesignToolJson, stripDesignToolJsonFromText, type ToolCall } from "./tools";
 
 type ToolRun = { name: string; result: unknown };
 
 function rec(result: unknown): Record<string, unknown> {
   return result && typeof result === "object" ? (result as Record<string, unknown>) : {};
+}
+
+/** Drop data-URL payload before journal / chat tool cards. Keep path for image_understand. */
+export function screenshotResultForLog(name: string, result: unknown): unknown {
+  if (name !== "design_screenshot" && name !== "design_export") return result;
+  const r = rec(result);
+  if (typeof r.image !== "string" && !r.path) return result;
+  return {
+    ok: r.ok !== false,
+    format: r.format,
+    path: r.path,
+    url: r.url,
+    captured: true,
+    ...(typeof r.image === "string" ? { bytes: r.image.length } : {}),
+  };
+}
+
+export function screenshotImageFromRuns(_runs: ToolRun[]): string | undefined {
+  return undefined;
 }
 
 export function dedupeToolCalls(calls: ToolCall[]): ToolCall[] {
@@ -48,12 +67,14 @@ function deleteSummary(result: Record<string, unknown>): string {
 function updateSummary(result: Record<string, unknown>): string {
   const changed = Number(result.changed ?? 0);
   const matched = Number(result.matched ?? 0);
-  if (!changed) return matched ? "No changes applied." : "Nothing matched.";
+  const warns = Array.isArray(result.warnings) ? result.warnings.length : 0;
+  if (!changed) return matched ? "No IR changes (values already set) — synced live canvas." : "Nothing matched.";
   const diff = Array.isArray(result.diff) ? result.diff : [];
   const ids = diff.map((row) => String((row as Record<string, unknown>).id ?? "")).filter(Boolean);
-  if (ids.length === 1) return `Updated ${ids[0]}.`;
-  if (ids.length) return `Updated ${ids.length} objects.`;
-  return `Updated ${changed} field${changed === 1 ? "" : "s"}.`;
+  const warnNote = warns ? ` (${warns} field${warns === 1 ? "" : "s"} won't show on canvas)` : "";
+  if (ids.length === 1) return `Updated ${ids[0]}.${warnNote}`;
+  if (ids.length) return `Updated ${ids.length} objects.${warnNote}`;
+  return `Updated ${changed} field${changed === 1 ? "" : "s"}.${warnNote}`;
 }
 
 function searchSummary(result: Record<string, unknown>): string {
@@ -69,21 +90,127 @@ function oneLine(name: string, result: unknown): string {
   if (name === "design_delete") return deleteSummary(r);
   if (name === "design_update") return updateSummary(r);
   if (name === "design_search_icons") return searchSummary(r);
+  if (name === "design_copy_styles") {
+    const from = String(r.from ?? "");
+    const to = String(r.to ?? "");
+    if (r.unchanged) return `Styles on ${to} already match ${from} — refreshed canvas.`;
+    const n = Number(r.changed ?? 0);
+    return n ? `Copied styles ${from} → ${to} (${n} slot${n === 1 ? "" : "s"}).` : `Copied styles ${from} → ${to}.`;
+  }
   if (name === "design_create") {
     const created = Array.isArray(r.created) ? r.created.map(String) : [];
     return created.length ? `Created ${created.join(", ")}.` : "Nothing created.";
+  }
+  if (name === "design_export") return r.dsl || r.document ? "Exported design." : "Export failed.";
+  if (name === "design_screenshot") {
+    if (r.ok === false) return String(r.error ?? "Screenshot failed.");
+    const path = typeof r.path === "string" ? r.path : "";
+    return path
+      ? `Wrote canvas screenshot to ${path}. Emit image_understand to read it.`
+      : r.image || r.captured
+        ? "Captured a canvas screenshot."
+        : "Screenshot pending.";
+  }
+  if (name === "image_understand") {
+    if (r.ok === false) return String(r.error ?? understandAnswer(r) ?? "image_understand failed.");
+    const answer = understandAnswer(r);
+    if (answer) return answer.slice(0, 400);
+    return "Read the screenshot.";
+  }
+  if (name === "design_set_page_background") {
+    if (Array.isArray(r.diff) && r.diff.length) return "Set page background.";
+    return r.changed ? "Cleared page background." : "Page background unchanged.";
+  }
+  if (name === "design_insert_image") {
+    const created = Array.isArray(r.created) ? r.created.map(String) : [];
+    return created.length ? `Inserted image ${created.join(", ")}.` : "Image insert failed.";
+  }
+  if (name === "image_create" || name === "image_transform") {
+    const path = outputPathFromEnvelope(r);
+    return path ? `Wrote ${path}.` : "Image tool finished.";
   }
   if (name === "design") return String(r.error ?? "Design error.");
   return "Done.";
 }
 
+function understandAnswer(r: Record<string, unknown>): string | undefined {
+  const direct = r.answer ?? r.text ?? r.result ?? r.content;
+  if (typeof direct === "string" && direct.trim()) return direct.trim();
+  const results = Array.isArray(r.results) ? r.results : [];
+  for (const row of results) {
+    if (!row || typeof row !== "object") continue;
+    const rec = row as Record<string, unknown>;
+    if (typeof rec.error === "string" && rec.error.trim()) return rec.error.trim();
+    const text = rec.text ?? rec.answer ?? rec.content ?? rec.output;
+    if (typeof text === "string" && text.trim()) return text.trim();
+  }
+  return undefined;
+}
+
+function outputPathFromEnvelope(r: Record<string, unknown>): string | undefined {
+  const results = Array.isArray(r.results) ? r.results : [];
+  for (const row of results) {
+    if (!row || typeof row !== "object") continue;
+    const rec = row as Record<string, unknown>;
+    const out = rec.output_path ?? rec.path;
+    if (typeof out === "string" && out.trim()) return out.trim();
+  }
+  return undefined;
+}
+
+/** Bubble text after host-run tools — strips JSON, keeps short model prose if any. */
+export function assistantDisplayText(
+  raw: string,
+  runs: ToolRun[],
+  opts?: { truncated?: boolean; parseFailed?: boolean },
+): string {
+  const prose = stripDesignToolJsonFromText(raw).trim();
+  const toolLine = runs.length
+    ? assistantReplyForDesignTools(runs, { truncated: opts?.truncated })
+    : opts?.parseFailed
+      ? designToolParseFailureMessage(raw, 0)
+      : "";
+  const keepProse = prose.length > 0 && !/^done\.?$/i.test(prose) && !/design_[a-z_]+/i.test(prose);
+  if (keepProse && toolLine) return `${prose}\n\n${toolLine}`;
+  if (toolLine) return toolLine;
+  if (keepProse) return prose;
+  return prose;
+}
+
+/** Warn only when truncation likely blocked the edit (not trailing junk after a successful run). */
+export function shouldWarnDesignResponseTruncation(opts: {
+  truncatedJson: boolean;
+  finishReason?: string | null;
+  runs: ToolRun[];
+  parsedCount: number;
+}): boolean {
+  if (opts.finishReason === "length") return true;
+  if (!opts.truncatedJson) return false;
+  if (!opts.parsedCount || !opts.runs.length) return true;
+  if (opts.runs.some((row) => rec(row.result).ok === false)) return true;
+  return false;
+}
+
 /** Short assistant bubble (no raw JSON). */
-export function assistantReplyForDesignTools(runs: ToolRun[]): string {
+export function assistantReplyForDesignTools(runs: ToolRun[], opts?: { truncated?: boolean }): string {
   if (!runs.length) return "I couldn't apply that change.";
   const lines = runs.map((row) => oneLine(row.name, row.result));
   const errors = runs.filter((row) => rec(row.result).ok === false);
-  if (errors.length === runs.length) return lines.join(" ");
-  return lines.join(" ");
+  const body = errors.length === runs.length ? lines.join(" ") : lines.join(" ");
+  if (opts?.truncated) return `${body} (response cut off — retry if the canvas did not update.)`;
+  return body;
+}
+
+/** User-facing message when design tool JSON was seen but not parsed. */
+export function designToolParseFailureMessage(text: string, parsedCount: number): string {
+  if (parsedCount > 0) return "";
+  if (!/design_[a-z_]+/i.test(text)) {
+    return "The model described the scene instead of emitting a tool call. Ask for the change again in one short request.";
+  }
+  if (looksTruncatedDesignToolJson(text) || looksTruncatedDesignToolJson(stripDesignToolJsonFromText(text))) {
+    return "The tool call was cut off before it finished (truncated JSON). Try again or ask for a smaller change.";
+  }
+  return "Couldn't parse the tool JSON (mixed with a scene report). Ask for the same change again.";
 }
 
 /** Tool panel — slightly more detail. */

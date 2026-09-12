@@ -117,6 +117,30 @@ export function parseFabricJSON(raw: string): Record<string, unknown> {
   return data;
 }
 
+/** Scene dimensions embedded in Fabric JSON, independent of retina/backing-store canvas size. */
+export function canvasSceneSize(
+  data: Record<string, unknown>,
+): { width: number; height: number } | null {
+  if (typeof data._designDsl === "string") {
+    const match = data._designDsl.match(
+      /^canvas\s+\S+\s+([0-9]+(?:\.[0-9]+)?)\s+([0-9]+(?:\.[0-9]+)?)/m,
+    );
+    if (match) {
+      const width = Number(match[1]);
+      const height = Number(match[2]);
+      if (width > 0 && height > 0) return { width, height };
+    }
+  }
+  let size: { width: number; height: number } | null = null;
+  walkCanvasRecords(data.objects ?? [], (rec) => {
+    if (size || rec._id !== "canvas.bg") return;
+    const width = Number(rec.width ?? 0) * Math.abs(Number(rec.scaleX ?? 1));
+    const height = Number(rec.height ?? 0) * Math.abs(Number(rec.scaleY ?? 1));
+    if (width > 0 && height > 0) size = { width, height };
+  });
+  return size;
+}
+
 export function sanitizeCanvasJSONString(raw: string): string {
   try {
     return JSON.stringify(parseFabricJSON(raw));

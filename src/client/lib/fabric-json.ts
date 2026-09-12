@@ -4,7 +4,10 @@ import { isBgImage, restoreLockedBackgrounds } from "./background-image";
 import { restoreStylePresets } from "./style-presets";
 import { restoreElementGroups } from "./element-group";
 import { restoreObjectIdentities } from "./object-identity";
-import { parseFabricJSON } from "../../shared/canvas-json";
+import { hydratePageBackground } from "./design-images";
+import { applyDesignStylesToCanvas } from "./design-style-sync";
+import { documentFromCanvasJson } from "../../design/project";
+import { canvasSceneSize, parseFabricJSON } from "../../shared/canvas-json";
 
 export {
   listCanvasAssets,
@@ -68,12 +71,19 @@ export async function loadFabricJSON(
   const wasRendering = canvas.renderOnAddRemove;
   canvas.renderOnAddRemove = false;
   try {
-    await canvas.loadFromJSON(parseFabricJSON(raw));
+    const parsed = parseFabricJSON(raw);
+    const scene = canvasSceneSize(parsed);
+    await canvas.loadFromJSON(parsed);
     restoreImageCornerRadii(canvas);
     restoreStylePresets(canvas);
     restoreElementGroups(canvas);
     restoreObjectIdentities(canvas);
     restoreLockedBackgrounds(canvas);
+    const doc = documentFromCanvasJson(JSON.stringify(parsed));
+    if (doc) applyDesignStylesToCanvas(canvas, doc);
+    // Every load path (page switch, undo, template, thumbnail, headless export,
+    // and design-tool reload) must restore the page photo to scene dimensions.
+    await hydratePageBackground(canvas, scene?.width, scene?.height);
     for (const issue of inspectLoadedImages(canvas)) {
       opts?.onWarn?.(issue);
       console.warn(issue);

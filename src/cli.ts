@@ -6,6 +6,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import open from "open";
 import { listDesignsForCli, runExport } from "./cli-export.js";
+import { exportDslMarkdown, queryDesignDsl } from "./cli-dsl.js";
+import { runCliPrompt } from "./cli-prompt.js";
 import { createOpenDesignApp } from "./server/index.js";
 import { resolveIconDir } from "./server/icon-dir.js";
 import { listenHono } from "./server/listen.js";
@@ -25,7 +27,22 @@ export const DEFAULT_UI_PORT = 5174;
 function parseArgv(argv: string[]) {
   const flags = new Map<string, string | boolean>();
   const rest: string[] = [];
-  const valueFlags = new Set(["--port", "-o", "--out", "--page", "--scale"]);
+  const valueFlags = new Set([
+    "--port",
+    "-o",
+    "--out",
+    "--page",
+    "--scale",
+    "--format",
+    "-p",
+    "--prompt",
+    "-q",
+    "--query",
+    "--fields",
+    "--limit",
+    "--model",
+    "--max-rounds",
+  ]);
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (valueFlags.has(a)) {
@@ -60,15 +77,26 @@ const HELP = `
 
   Commands:
     (default)             Start the editor and open the browser
-    export [id|name]      Headless PNG (uses Chrome or Edge)
+    export [id|name]      Export PNG, or Markdown with --format dsl
+    dsl [id|name]         Export Design DSL as a Markdown file
+    query [id|name] EXPR  Query Design DSL and print JSON
+    prompt [id|name] TEXT Prompt the design agent and save its edits
     ls                    List designs in this folder
 
   Options:
     --port <number>       Preferred port (default: ${DEFAULT_API_PORT})
     --no-browser          Don't open the browser
-    -o, --out <file>      PNG path (export)
-    --page <n>            Page number, 1-based (export)
+    -o, --out <file>      Output path (export/dsl)
+    --format <png|dsl>    Export format, default png
+    --page <n>            Page number, 1-based
     --scale <n>           PNG multiplier, default 2 (export)
+    -q, --query <expr>    Query expression (alternative to trailing EXPR)
+    --fields <a,b,...>    Query result fields
+    --limit <n>           Maximum query results, default 50
+    -p, --prompt <text>   Prompt text (alternative to trailing TEXT)
+    --model <name>        LLM model/preset, default quick (prompt)
+    --max-rounds <n>      Maximum tool-loop rounds, default 8 (prompt)
+    --dry-run             Run tools without saving (prompt)
     -h, --help            Show this help
 
   Storage (merged union; project shadows same id/key):
@@ -86,7 +114,15 @@ const preferredPort =
     ? parseInt(str("--port")!, 10)
     : Number(process.env.OPEND_PORT || DEFAULT_API_PORT);
 
-const commandName = rest.find((a) => a === "export" || a === "ls" || a === "list");
+const commandName = rest.find(
+  (a) =>
+    a === "export" ||
+    a === "dsl" ||
+    a === "query" ||
+    a === "prompt" ||
+    a === "ls" ||
+    a === "list",
+);
 const commandAt = commandName ? rest.indexOf(commandName) : -1;
 
 try {
@@ -96,8 +132,20 @@ try {
   }
 
   if (commandName === "export") {
+    const format = str("--format")?.trim().toLowerCase() || "png";
     const scaleRaw = str("--scale");
     const pageRaw = str("--page");
+    if (format === "dsl" || format === "md" || format === "markdown") {
+      const out = exportDslMarkdown({
+        cwd: targetDir,
+        query: rest[commandAt + 1],
+        out: str("-o", "--out"),
+        page: pageRaw ? Math.max(1, parseInt(pageRaw, 10) || 1) : 1,
+      });
+      console.log(out);
+      process.exit(0);
+    }
+    if (format !== "png") throw new Error(`Unknown export format "${format}" (use png or dsl)`);
     await runExport({
       cwd: targetDir,
       query: rest[commandAt + 1],
@@ -108,6 +156,77 @@ try {
       clientDir,
       iconDir,
     });
+    process.exit(0);
+  }
+
+  if (commandName === "dsl") {
+    const pageRaw = str("--page");
+    const out = exportDslMarkdown({
+      cwd: targetDir,
+      query: rest[commandAt + 1],
+      out: str("-o", "--out"),
+      page: pageRaw ? Math.max(1, parseInt(pageRaw, 10) || 1) : 1,
+    });
+    console.log(out);
+    process.exit(0);
+  }
+
+  if (commandName === "query") {
+    const designQuery = rest[commandAt + 1];
+    const expression = str("-q", "--query") ?? rest.slice(commandAt + 2).join(" ");
+    if (!expression.trim()) {
+      throw new Error(
+        'Query expression is required: pm-opendesign query <id|name> "type=txt role=title"',
+      );
+    }
+    const pageRaw = str("--page");
+    const limitRaw = str("--limit");
+    const fields = str("--fields")
+      ?.split(",")
+      .map((field) => field.trim())
+      .filter(Boolean);
+    const result = queryDesignDsl({
+      cwd: targetDir,
+      designQuery,
+      page: pageRaw ? Math.max(1, parseInt(pageRaw, 10) || 1) : 1,
+      query: expression,
+      fields,
+      limit: limitRaw ? Math.max(1, parseInt(limitRaw, 10) || 50) : undefined,
+    });
+    console.log(JSON.stringify(result, null, 2));
+    process.exit(0);
+  }
+
+  if (commandName === "prompt") {
+    const query = rest[commandAt + 1];
+    const prompt = str("-p", "--prompt") ?? rest.slice(commandAt + 2).join(" ");
+    if (!prompt.trim()) {
+      throw new Error(
+        'Prompt text is required: pm-opendesign prompt <id|name> "Move the title down 20px"',
+      );
+    }
+    const pageRaw = str("--page");
+    const roundsRaw = str("--max-rounds");
+    const roots = resolveRoots(targetDir);
+    const llm = await ensureLlmServer({ cwd: roots.project, searchFrom: pkgRoot });
+    try {
+      const result = await runCliPrompt({
+        cwd: targetDir,
+        query,
+        prompt,
+        page: pageRaw ? Math.max(1, parseInt(pageRaw, 10) || 1) : 1,
+        model: str("--model")?.trim() || process.env.OPEND_LLM_PRESET?.trim() || "quick",
+        maxRounds: roundsRaw ? Math.max(1, parseInt(roundsRaw, 10) || 8) : 8,
+        dryRun: flags.has("--dry-run"),
+        llm,
+      });
+      console.log(
+        `${result.saved ? "saved" : "dry-run"} ${result.designName} page ${result.page} ` +
+          `(${result.calls.map((call) => call.name).join(", ")})`,
+      );
+    } finally {
+      llm.stop();
+    }
     process.exit(0);
   }
 } catch (err) {

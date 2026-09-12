@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from "preact/hooks";
 import * as fabric from "fabric";
 import { loadFabricJSON } from "../lib/fabric-json";
-import { canvasToPngDataUrl } from "../lib/export-png";
+import { canvasToPngDataUrl, canvasToScreenshotDataUrl } from "../lib/export-png";
 import { imageBlobFromClipboard, saveClipboardImageToUploads } from "../lib/clipboard-image";
 import { uploadImageFile, isSvgFile, isSvgUrl } from "../lib/file-drop";
 import {
@@ -46,13 +46,33 @@ import {
   writeCopiedObjectsToClipboard,
 } from "../lib/copy-objects";
 import { installSnapGuides } from "../lib/snap-guides";
+import { installImageCropGestures } from "../lib/image-crop";
 import { cssLinearToFabricGradient } from "../lib/fill-presets";
 import { createShapeObject, type ShapeKind } from "../lib/shapes";
 import { api } from "../api";
 import type { LibraryElement } from "../types";
-import { isBgImage, lockBackgroundImage } from "../lib/background-image";
-import { attachDesignDocument, projectToFabricJSON } from "../../design/project";
-import { getActiveDocument } from "../../design/tools";
+import {
+  isBgImage,
+  lockBackgroundImage,
+  pageLayer,
+  removePagePhoto,
+  setPageThemeFill,
+  stackPageBackgroundLayers,
+} from "../lib/background-image";
+import { patchPageBackgroundInIr, syncImageNodeInIr, syncObjectStyleInIr, syncStackOrderInIr } from "../lib/design-ir-sync";
+import { restackSelection, type StackDirection } from "../lib/layer-stack";
+import { alignSelectionToFirst, type AlignEdge } from "../lib/align-objects";
+import {
+  attachDesignDocument,
+  documentFromCanvasJson,
+  projectToFabricJSON,
+  validateFabricProjection,
+} from "../../design/project";
+import { hydrateDesignIconFills } from "../lib/design-icons";
+import { hydrateDesignImages, hydratePageBackground, patchFabricImageSrc, patchPageBackgroundSrc } from "../lib/design-images";
+import { syncDesignNodesToCanvas } from "../lib/design-style-sync";
+import type { CanvasPatchPlan } from "../../design/apply-plan";
+import { getActiveDocument, setActiveDocument } from "../../design/tools";
 import type { DesignDocument } from "../../design/types";
 
 const MAX_HISTORY = 50;
@@ -193,11 +213,17 @@ export function useCanvasState() {
     setCanRedo(hist.index < hist.entries.length - 1);
   }, []);
 
+  const canvasHistoryJSON = useCallback((canvas: fabric.Canvas) => {
+    const raw = JSON.stringify(canvas.toJSON([...FABRIC_EXTRA_PROPS]));
+    const doc = getActiveDocument();
+    return doc ? attachDesignDocument(raw, doc) : raw;
+  }, []);
+
   const saveHistory = useCallback((pageId: string) => {
     if (isRestoringRef.current.has(pageId)) return;
     const canvas = canvasMapRef.current.get(pageId);
     if (!canvas) return;
-    const json = JSON.stringify(canvas.toJSON([...FABRIC_EXTRA_PROPS]));
+    const json = canvasHistoryJSON(canvas);
     let hist = historyMapRef.current.get(pageId);
     if (!hist) {
       hist = { entries: [], index: -1 };
@@ -212,7 +238,7 @@ export function useCanvasState() {
       hist.index = hist.entries.length - 1;
     }
     updateUndoRedoState(pageId);
-  }, [updateUndoRedoState]);
+  }, [canvasHistoryJSON, updateUndoRedoState]);
 
   const registerCanvas = useCallback((pageId: string, canvas: fabric.Canvas) => {
     canvasMapRef.current.set(pageId, canvas);
@@ -287,6 +313,7 @@ export function useCanvasState() {
       }
     });
     installSnapGuides(canvas);
+    installImageCropGestures(canvas, () => saveHistory(pageId));
 
     // History + layer events
     canvas.on("object:added", (e) => {
@@ -331,11 +358,11 @@ export function useCanvasState() {
 
     // Initial history snapshot
     setTimeout(() => {
-      const json = JSON.stringify(canvas.toJSON([...FABRIC_EXTRA_PROPS]));
+      const json = canvasHistoryJSON(canvas);
       historyMapRef.current.set(pageId, { entries: [json], index: 0 });
       updateUndoRedoState(pageId);
     }, 100);
-  }, [saveHistory, updateUndoRedoState]);
+  }, [canvasHistoryJSON, saveHistory, updateUndoRedoState]);
 
   const unregisterCanvas = useCallback((pageId: string) => {
     canvasMapRef.current.delete(pageId);
@@ -496,13 +523,17 @@ export function useCanvasState() {
         });
         applyImageCornerRadius(img, IMAGE_CORNER_RADIUS_DEFAULT);
         canvas.add(img);
+        ensureObjectIdentity(img, canvas);
+        syncImageNodeInIr(img);
         canvas.setActiveObject(img);
         canvas.requestRenderAll();
+        const pageId = activeCanvasIdRef.current;
+        if (pageId) saveHistory(pageId);
       } catch (e) {
         console.error("Failed to load image:", e);
       }
     },
-    [getActiveCanvas, canvasWidth, canvasHeight, placeIconObject]
+    [getActiveCanvas, canvasWidth, canvasHeight, placeIconObject, saveHistory]
   );
 
   const addDroppedImages = useCallback(
@@ -547,9 +578,12 @@ export function useCanvasState() {
         const style = captureObjectStyle(selectedObject);
         const radius = readImageCornerRadius(selectedObject);
         applyObjectStyle(img, style);
+        const id = readObjectId(selectedObject);
         swapCanvasObject(canvas, selectedObject, img);
+        if (id) (img as { _id?: string })._id = id;
         applyImageCornerRadius(img, radius);
         ensureStyleRenderer(img);
+        syncImageNodeInIr(img);
         canvas.setActiveObject(img);
         canvas.requestRenderAll();
         saveHistory(pageId);
@@ -583,13 +617,7 @@ export function useCanvasState() {
       const pageId = activeCanvasIdRef.current;
       if (!canvas || !pageId) return;
 
-      const clearBgImage = () => {
-        canvas.getObjects().filter(isBgImage).forEach((obj) => canvas.remove(obj));
-      };
-
-      if (type === "color") {
-        clearBgImage();
-        canvas.backgroundColor = value;
+      const finish = () => {
         invalidateGlassBackdrop(canvas);
         canvas.requestRenderAll();
         saveHistory(pageId);
@@ -598,35 +626,45 @@ export function useCanvasState() {
           setSelectedObject(null);
           setSelectionEpoch((n) => n + 1);
         }
+      };
+
+      if (type === "color") {
+        removePagePhoto(canvas);
+        patchPageBackgroundInIr({ clear: true });
+        setPageThemeFill(canvas, value);
+        canvas.backgroundColor = value;
+        finish();
         return;
       }
 
       if (type === "gradient") {
-        clearBgImage();
+        removePagePhoto(canvas);
+        patchPageBackgroundInIr({ clear: true });
+        setPageThemeFill(canvas, "transparent");
         canvas.backgroundColor = cssLinearToFabricGradient(value, canvasWidth, canvasHeight);
-        invalidateGlassBackdrop(canvas);
-        canvas.requestRenderAll();
-        saveHistory(pageId);
-        if (selectedObject && isBgImage(selectedObject)) {
-          canvas.discardActiveObject();
-          setSelectedObject(null);
-          setSelectionEpoch((n) => n + 1);
-        }
+        finish();
         return;
       }
 
       fabric.FabricImage.fromURL(value, { crossOrigin: "anonymous" }).then((img) => {
         const scaleX = canvasWidth / (img.width || 1);
         const scaleY = canvasHeight / (img.height || 1);
-        img.set({ left: 0, top: 0, scaleX, scaleY });
-        clearBgImage();
+        img.set({
+          left: 0,
+          top: 0,
+          originX: "left",
+          originY: "top",
+          scaleX,
+          scaleY,
+          _id: "canvas.photo",
+        });
+        removePagePhoto(canvas);
+        patchPageBackgroundInIr({ src: value });
         lockBackgroundImage(img);
         canvas.add(img);
-        canvas.sendObjectToBack(img);
+        stackPageBackgroundLayers(canvas);
         canvas.discardActiveObject();
-        invalidateGlassBackdrop(canvas);
-        canvas.requestRenderAll();
-        saveHistory(pageId);
+        finish();
         setSelectedObject(null);
         setSelectionEpoch((n) => n + 1);
       });
@@ -639,7 +677,7 @@ export function useCanvasState() {
     const pageId = activeCanvasIdRef.current;
     const obj = selectedObject;
     if (!canvas || !pageId || !(obj instanceof fabric.FabricImage) || isBgImage(obj)) return;
-    canvas.getObjects().filter((o) => isBgImage(o) && o !== obj).forEach((o) => canvas.remove(o));
+    removePagePhoto(canvas);
     obj.set({
       originX: "left",
       originY: "top",
@@ -650,9 +688,14 @@ export function useCanvasState() {
       angle: 0,
       flipX: false,
       flipY: false,
+      _id: "canvas.photo",
     });
+    const src =
+      (typeof obj.getSrc === "function" ? obj.getSrc() : "") ||
+      ((obj.getElement() as { src?: string } | null)?.src ?? "");
+    if (src) patchPageBackgroundInIr({ src });
     lockBackgroundImage(obj);
-    canvas.sendObjectToBack(obj);
+    stackPageBackgroundLayers(canvas);
     canvas.discardActiveObject();
     invalidateGlassBackdrop(canvas);
     canvas.requestRenderAll();
@@ -673,7 +716,10 @@ export function useCanvasState() {
           : []
         : selectedCanvasObjects(canvas, selectedObject);
       if (!canvas || !pageId || targets.length === 0) return;
-      for (const obj of targets) applyObjectPatch(obj, props);
+      for (const obj of targets) {
+        applyObjectPatch(obj, props);
+        syncObjectStyleInIr(obj);
+      }
       canvas.requestRenderAll();
       saveHistory(pageId);
       setSelectedObject(targets[0]);
@@ -903,6 +949,7 @@ export function useCanvasState() {
       void loadFabricJSON(canvas, json).then(() => {
         canvas.requestRenderAll();
         isRestoringRef.current.delete(pageId);
+        setActiveDocument(documentFromCanvasJson(json));
         updateUndoRedoState(pageId);
         setLayersEpoch((n) => n + 1);
       });
@@ -961,6 +1008,19 @@ export function useCanvasState() {
 
   // ── Export ──────────────────────────────────────────────────────────
 
+  const captureCanvasScreenshot = useCallback((): string | null => {
+    const canvas = getActiveCanvas();
+    if (!canvas) return null;
+    const activeObj = canvas.getActiveObject();
+    canvas.discardActiveObject();
+    const dataURL = canvasToScreenshotDataUrl(canvas);
+    if (activeObj) {
+      canvas.setActiveObject(activeObj);
+      canvas.requestRenderAll();
+    }
+    return dataURL;
+  }, [getActiveCanvas]);
+
   const exportPNG = useCallback(() => {
     const canvas = getActiveCanvas();
     if (!canvas) return;
@@ -985,23 +1045,87 @@ export function useCanvasState() {
   const getCanvasJSON = useCallback(() => {
     const canvas = getActiveCanvas();
     if (!canvas) return "{}";
-    return attachDesignDocument(JSON.stringify(canvas.toJSON([...FABRIC_EXTRA_PROPS])), getActiveDocument());
-  }, [getActiveCanvas]);
+    return canvasHistoryJSON(canvas);
+  }, [getActiveCanvas, canvasHistoryJSON]);
 
-  const getCanvasJSONForPage = useCallback((pageId: string) => {
-    const canvas = canvasMapRef.current.get(pageId);
-    if (!canvas) return "{}";
-    return attachDesignDocument(JSON.stringify(canvas.toJSON([...FABRIC_EXTRA_PROPS])), getActiveDocument());
-  }, []);
+  const getCanvasJSONForPage = useCallback(
+    (pageId: string) => {
+      const canvas = canvasMapRef.current.get(pageId);
+      if (!canvas) return "{}";
+      return canvasHistoryJSON(canvas);
+    },
+    [canvasHistoryJSON],
+  );
+
+  const patchDesignOnCanvas = useCallback(
+    async (doc: DesignDocument, plan: CanvasPatchPlan): Promise<boolean> => {
+      const canvas = getActiveCanvas();
+      const pageId = activeCanvasIdRef.current;
+      if (!canvas || !pageId || plan.mode !== "patch") return false;
+      setActiveDocument(doc);
+      let changed = false;
+      for (const row of plan.images ?? []) {
+        const next = await patchFabricImageSrc(canvas, row.id, row.url);
+        if (next) changed = true;
+      }
+      if (plan.pageBackground !== undefined) {
+        if (plan.pageBackground === null) {
+          removePagePhoto(canvas);
+          changed = true;
+        } else {
+          const ok = await patchPageBackgroundSrc(canvas, plan.pageBackground, canvasWidth, canvasHeight);
+          if (!ok) return false;
+          changed = true;
+        }
+      }
+      if (plan.styleNodeIds?.length) {
+        const ok = await syncDesignNodesToCanvas(canvas, doc, plan.styleNodeIds);
+        if (!ok) return false;
+        changed = true;
+      }
+      if (changed) {
+        invalidateGlassBackdrop(canvas);
+        canvas.requestRenderAll();
+        saveHistory(pageId);
+      }
+      return true;
+    },
+    [getActiveCanvas, saveHistory, canvasWidth, canvasHeight],
+  );
 
   const applyDesignDocument = useCallback(
     async (doc: DesignDocument) => {
       const canvas = getActiveCanvas();
       const pageId = activeCanvasIdRef.current;
-      if (!canvas || !pageId) return;
+      if (!canvas || !pageId) {
+        console.warn("[design] applyDesignDocument skipped — no active canvas", { pageId });
+        return;
+      }
+      setActiveDocument(doc);
+      const fabricJson = projectToFabricJSON(doc);
+      const projection = validateFabricProjection(doc, fabricJson);
+      if (!projection.ok) {
+        console.warn("[design] applyDesignDocument projection mismatch", projection);
+      } else if (projection.offCanvas.length) {
+        console.info("[design] applyDesignDocument — instances off canvas", projection);
+      } else {
+        console.log("[design] applyDesignDocument", {
+          instances: projection.instances.length,
+          objects: JSON.parse(fabricJson).objects?.length,
+        });
+      }
       isRestoringRef.current.add(pageId);
       try {
-        await loadFabricJSON(canvas, projectToFabricJSON(doc));
+        await loadFabricJSON(canvas, fabricJson);
+        await hydratePageBackground(canvas, canvasWidth, canvasHeight);
+        canvas.getObjects().forEach((o) => {
+          if (o.shadow) {
+            o.objectCaching = false;
+            o.dirty = true;
+          }
+        });
+        await hydrateDesignIconFills(canvas, doc);
+        await hydrateDesignImages(canvas, doc);
         canvas.discardActiveObject();
         canvas.requestRenderAll();
         setSelectedObject(null);
@@ -1012,7 +1136,7 @@ export function useCanvasState() {
       }
       saveHistory(pageId);
     },
-    [getActiveCanvas, saveHistory],
+    [getActiveCanvas, saveHistory, canvasWidth, canvasHeight],
   );
 
   const loadTemplate = useCallback(
@@ -1046,8 +1170,9 @@ export function useCanvasState() {
           });
           canvas.requestRenderAll();
           isRestoringRef.current.delete(pageId);
+          setActiveDocument(documentFromCanvasJson(template.canvas_json));
           historyMapRef.current.set(pageId, {
-            entries: [JSON.stringify(canvas.toJSON([...FABRIC_EXTRA_PROPS]))],
+            entries: [canvasHistoryJSON(canvas)],
             index: 0,
           });
           updateUndoRedoState(pageId);
@@ -1055,7 +1180,40 @@ export function useCanvasState() {
         });
       }
     },
-    [getActiveCanvas, updateUndoRedoState]
+    [getActiveCanvas, canvasHistoryJSON, updateUndoRedoState]
+  );
+
+  const restackSelected = useCallback(
+    (direction: StackDirection) => {
+      const canvas = getActiveCanvas();
+      const pageId = activeCanvasIdRef.current;
+      if (!canvas || !pageId) return;
+      const next = restackSelection(canvas, selectedObject, direction);
+      if (!next) return;
+      syncStackOrderInIr(canvas.getObjects().filter((obj) => !isBgImage(obj)));
+      saveHistory(pageId);
+      setLayersEpoch((n) => n + 1);
+      setSelectionEpoch((n) => n + 1);
+    },
+    [getActiveCanvas, selectedObject, saveHistory]
+  );
+
+  const bringSelectionToFront = useCallback(() => restackSelected("front"), [restackSelected]);
+  const sendSelectionToBack = useCallback(() => restackSelected("back"), [restackSelected]);
+
+  const alignSelected = useCallback(
+    (edge: AlignEdge) => {
+      const canvas = getActiveCanvas();
+      const pageId = activeCanvasIdRef.current;
+      if (!canvas || !pageId) return;
+      const moved = alignSelectionToFirst(canvas, selectedObject, edge);
+      if (!moved) return;
+      const active = canvas.getActiveObject();
+      if (active) noteGlassBackdropSourceChange(active);
+      saveHistory(pageId);
+      setSelectionEpoch((n) => n + 1);
+    },
+    [getActiveCanvas, selectedObject, saveHistory]
   );
 
   // ── Keyboard shortcuts ──────────────────────────────────────────────
@@ -1082,6 +1240,10 @@ export function useCanvasState() {
       } else if (meta && e.key.toLowerCase() === "d" && !isTextEditing()) {
         e.preventDefault();
         void duplicateSelected();
+      } else if (meta && (e.key === "]" || e.key === "[") && !isTextEditing()) {
+        e.preventDefault();
+        if (e.key === "]") bringSelectionToFront();
+        else sendSelectionToBack();
       } else if (
         !meta &&
         (e.key === "ArrowLeft" ||
@@ -1144,7 +1306,7 @@ export function useCanvasState() {
       window.removeEventListener("blur", onBlur);
       window.removeEventListener("paste", onPaste);
     };
-  }, [undo, redo, deleteSelected, addImageFromClipboard, groupSelected, ungroupSelected, setAllCanvasesCtrlPick, nudgeSelected, commitNudgeHistory, copySelectedObjects, pasteCopiedCanvasObjects, duplicateSelected]);
+  }, [undo, redo, deleteSelected, addImageFromClipboard, groupSelected, ungroupSelected, setAllCanvasesCtrlPick, nudgeSelected, commitNudgeHistory, copySelectedObjects, pasteCopiedCanvasObjects, duplicateSelected, bringSelectionToFront, sendSelectionToBack]);
 
   function isTextEditing(): boolean {
     const el = document.activeElement;
@@ -1267,14 +1429,19 @@ export function useCanvasState() {
     zoomToFit,
     zoomIn,
     zoomOut,
+    captureCanvasScreenshot,
     exportPNG,
     getCanvasJSON,
     getCanvasJSONForPage,
     applyDesignDocument,
+    patchDesignOnCanvas,
     loadTemplate,
     layersEpoch,
     getLayers,
     selectLayer,
     reorderLayers,
+    bringSelectionToFront,
+    sendSelectionToBack,
+    alignSelected,
   };
 }

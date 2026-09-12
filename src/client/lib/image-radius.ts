@@ -6,6 +6,7 @@ export const FABRIC_EXTRA_PROPS = [
   "_layerId",
   "_id",
   "_isBgImage",
+  "_designBounds",
   "_cornerRadius",
   "_stylePreset",
   "_stylePresetBackup",
@@ -13,24 +14,15 @@ export const FABRIC_EXTRA_PROPS = [
   "_isIcon",
   "_iconName",
   "_iconUrl",
+  "_iconFill",
   "_isElementGroup",
   "_elementName",
   "_elementSource",
+  "_sourceW",
+  "_sourceH",
 ] as const;
 
 type ImageWithRadius = fabric.FabricImage & { _cornerRadius?: number };
-
-function clipCenterOffset(img: fabric.FabricImage) {
-  const w = img.width || 0;
-  const h = img.height || 0;
-  let left = 0;
-  let top = 0;
-  if (img.originX === "left") left = w / 2;
-  else if (img.originX === "right") left = -w / 2;
-  if (img.originY === "top") top = h / 2;
-  else if (img.originY === "bottom") top = -h / 2;
-  return { left, top };
-}
 
 type RectWithRadius = fabric.Rect & {
   _cornerRadius?: number;
@@ -180,7 +172,9 @@ export function applyImageCornerRadius(img: fabric.FabricImage, radius: number) 
 
   const rx = Math.min(px / sx, w / 2);
   const ry = Math.min(px / sy, h / 2);
-  const offset = clipCenterOffset(img);
+  // Clip is painted in object-local space, which Fabric always centers at 0,0.
+  // Do not offset by originX/originY — that shifts the bitmap 50% after left/top
+  // hydrates (user images start as center, IR sync flips origin to left/top).
   img.clipPath = new fabric.Rect({
     width: w,
     height: h,
@@ -188,8 +182,8 @@ export function applyImageCornerRadius(img: fabric.FabricImage, radius: number) 
     ry,
     originX: "center",
     originY: "center",
-    left: offset.left,
-    top: offset.top,
+    left: 0,
+    top: 0,
     absolutePositioned: false,
     objectCaching: false,
   });

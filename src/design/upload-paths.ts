@@ -1,0 +1,59 @@
+/** Normalize model/host paths to OpenDesign upload keys (under .OpenDesign/). */
+export function normalizeUploadKey(raw: string): string {
+  let key = raw.trim().replace(/\\/g, "/");
+  if (key.startsWith("/api/uploads/file/")) key = key.slice("/api/uploads/file/".length);
+  if (key.startsWith("http://") || key.startsWith("https://")) {
+    const m = key.match(/\/api\/uploads\/file\/(.+)$/);
+    if (m) key = m[1];
+  }
+  const uploadsAt = key.toLowerCase().indexOf("/uploads/");
+  if (uploadsAt >= 0) key = key.slice(uploadsAt + 1);
+  key = key.replace(/^\/+/, "");
+  if (key.startsWith(".OpenDesign/")) key = key.slice(".OpenDesign/".length);
+  return key;
+}
+
+export function uploadPublicUrl(key: string): string {
+  const safe = normalizeUploadKey(key);
+  return `/api/uploads/file/${safe}`;
+}
+
+/** Accept upload key, relative path, or public URL → canonical upload key. */
+export function resolveUploadKey(src: string): string {
+  const key = normalizeUploadKey(src);
+  if (!key.startsWith("uploads/")) {
+    if (key.startsWith("backgrounds/")) return `uploads/${key}`;
+    if (!key.includes("/")) return `uploads/${key}`;
+    return key;
+  }
+  return key;
+}
+
+export function isBackgroundUploadKey(key: string): boolean {
+  return resolveUploadKey(key).startsWith("uploads/backgrounds/");
+}
+
+export function isScreenshotUploadKey(key: string): boolean {
+  return resolveUploadKey(key).startsWith("uploads/screenshots/");
+}
+
+export function isCanvasImageUploadKey(key: string): boolean {
+  const k = resolveUploadKey(key);
+  return (
+    k.startsWith("uploads/") &&
+    !k.startsWith("uploads/backgrounds/") &&
+    !k.startsWith("uploads/icons/") &&
+    !k.startsWith("uploads/screenshots/")
+  );
+}
+
+export function uploadPathHints(): string {
+  return [
+    "CWD=.OpenDesign — image_create/image_transform/image_understand use relative paths here",
+    "page bg: output_path uploads/backgrounds/{slug}-v{n}.png → design_set_page_background",
+    "canvas img: output_path uploads/{slug}-v{n}.png → design_insert_image",
+    "screenshot: design_screenshot → uploads/screenshots/canvas.jpg then image_understand paths=[that exact path]",
+    "iterate: image_transform paths=[prev] output_path uploads/.../slug-v{n+1}.png",
+    "URL form: /api/uploads/file/uploads/backgrounds/hero-v1.png",
+  ].join("\n");
+}

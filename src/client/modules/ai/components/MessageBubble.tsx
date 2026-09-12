@@ -2,7 +2,9 @@
 import type { ComponentChildren } from "preact";
 import { Bot, User, Wrench, Loader2, Copy, Check, StopCircle } from "lucide-preact";
 import type { ChatMessage } from "../types";
+import { formatMessageCopyText } from "../chatTranscript";
 import { MarkdownRenderer, unescapeMarkdown } from "./MarkdownRenderer";
+import { ToolCallsPanel } from "./ToolCallsPanel";
 
 const URL_REGEX = /(https?:\/\/[^\s<>"')\]]+)/g;
 const URL_TEST = /^https?:\/\//;
@@ -38,13 +40,15 @@ export function MessageBubble({ message, onCancel }: { message: ChatMessage; onC
   const isTool = message.role === "tool";
   const [copied, setCopied] = useState(false);
 
+  const copyText = formatMessageCopyText(message);
+
   const handleCopy = useCallback(() => {
-    if (!message.content) return;
-    void navigator.clipboard.writeText(message.content).then(() => {
+    if (!copyText) return;
+    void navigator.clipboard.writeText(copyText).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     });
-  }, [message.content]);
+  }, [copyText]);
 
   return (
     <div class={`flex gap-2 min-w-0 ${isUser ? "flex-row-reverse" : ""}`}>
@@ -65,7 +69,7 @@ export function MessageBubble({ message, onCancel }: { message: ChatMessage; onC
               : "max-w-[95%] bg-zinc-100 text-zinc-800 rounded-bl-sm"
         }`}
       >
-        {message.content ? (
+        {copyText ? (
           <button
             type="button"
             onClick={handleCopy}
@@ -137,6 +141,8 @@ export function MessageBubble({ message, onCancel }: { message: ChatMessage; onC
             ) : null}
           </div>
         ) : null}
+
+        {!isUser && message.toolRuns?.length ? <ToolCallsPanel runs={message.toolRuns} /> : null}
       </div>
     </div>
   );

@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { layerRoot, mergeOrder, type Layer, type Roots } from "./paths.js";
 
-export type UploadKind = "images" | "backgrounds" | "icons";
+export type UploadKind = "images" | "backgrounds" | "icons" | "screenshots";
 
 export type ListedUpload = {
   key: string;
@@ -33,6 +33,7 @@ function sanitizeKey(key: string) {
 function prefixFor(kind: UploadKind) {
   if (kind === "backgrounds") return "uploads/backgrounds/";
   if (kind === "icons") return "uploads/icons/";
+  if (kind === "screenshots") return "uploads/screenshots/";
   return "uploads/";
 }
 
@@ -50,6 +51,20 @@ function abs(root: string, key: string) {
   return path.join(root, key.split("/").join(path.sep));
 }
 
+export function putUploadKey(
+  roots: Roots,
+  key: string,
+  data: ArrayBuffer | Uint8Array,
+  layer: Layer = "project"
+): ListedUpload {
+  const safe = assertUploadKey(key);
+  const file = abs(layerRoot(roots, layer), safe);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, Buffer.from(data instanceof Uint8Array ? data : new Uint8Array(data)));
+  const filename = safe.split("/").pop() || safe;
+  return { key: safe, filename, url: publicUrl(safe), source: layer };
+}
+
 export function putUpload(
   roots: Roots,
   kind: UploadKind,
@@ -59,12 +74,9 @@ export function putUpload(
   layer: Layer = "project"
 ): ListedUpload {
   const safeName = sanitizeKey(filename).split("/").pop() || filename;
-  const key = assertUploadKey(prefixFor(kind) + safeName);
-  const file = abs(layerRoot(roots, layer), key);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, Buffer.from(data instanceof Uint8Array ? data : new Uint8Array(data)));
+  const item = putUploadKey(roots, prefixFor(kind) + safeName, data, layer);
   void contentType;
-  return { key, filename: safeName, url: publicUrl(key), source: layer };
+  return item;
 }
 
 export function getUpload(
@@ -99,7 +111,7 @@ function listRoot(root: string, kind: UploadKind, layer: Layer): ListedUpload[] 
   for (const filename of fs.readdirSync(dir)) {
     const file = path.join(dir, filename);
     if (!fs.statSync(file).isFile()) continue;
-    if (kind === "images" && (filename === "backgrounds" || filename === "icons")) continue;
+    if (kind === "images" && (filename === "backgrounds" || filename === "icons" || filename === "screenshots")) continue;
     const key = prefix + filename;
     items.push({ key, filename, url: publicUrl(key), source: layer });
   }

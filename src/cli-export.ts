@@ -36,7 +36,7 @@ export function listDesignsForCli(cwd: string) {
   printDesigns(store.listDesigns(roots));
 }
 
-function pickDesign(cwd: string, query: string | undefined) {
+export function pickDesign(cwd: string, query: string | undefined, command = "export") {
   const roots = resolveRoots(cwd);
   const all = store.listDesigns(roots);
   if (!all.length) {
@@ -46,7 +46,7 @@ function pickDesign(cwd: string, query: string | undefined) {
     if (all.length === 1) return store.getDesign(roots, all[0].id)!;
     console.log("Designs:\n");
     printDesigns(all);
-    throw new Error("Pass a design id or name: pm-opendesign export <id>");
+    throw new Error(`Pass a design id or name: pm-opendesign ${command} <id>`);
   }
   const exactId = all.find((d) => d.id === query);
   if (exactId) return store.getDesign(roots, exactId.id)!;

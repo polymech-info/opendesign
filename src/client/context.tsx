@@ -1,6 +1,6 @@
 import { createContext } from "preact";
 import { useContext } from "preact/hooks";
-import type { Design, Template, Page } from "./types";
+import type { Design, DesignVersion, Template, Page } from "./types";
 import type { DesignDocument } from "../design/types";
 import type * as fabric from "fabric";
 import type { LayerItem } from "./hooks/use-canvas";
@@ -69,16 +69,21 @@ export interface EditorContextValue {
   zoomToFit: () => void;
   zoomIn: () => void;
   zoomOut: () => void;
+  captureCanvasScreenshot: () => string | null;
   exportPNG: () => void;
   getCanvasJSON: () => string;
   getCanvasJSONForPage: (pageId: string) => string;
   applyDesignDocument: (doc: DesignDocument) => Promise<void>;
+  patchDesignOnCanvas: (doc: DesignDocument, plan: import("../design/apply-plan").CanvasPatchPlan) => Promise<boolean>;
   loadTemplate: (template: Template) => void;
   scheduleSave: () => void;
   layersEpoch: number;
   getLayers: () => LayerItem[];
   selectLayer: (id: string) => void;
   reorderLayers: (fromDisplayIndex: number, toDisplayIndex: number) => void;
+  bringSelectionToFront: () => void;
+  sendSelectionToBack: () => void;
+  alignSelected: (edge: "left" | "right" | "top" | "bottom") => void;
 
   // Router
   navigate: (to: string) => void;
@@ -89,10 +94,17 @@ export interface EditorContextValue {
   createDesign: (size?: { width: number; height: number }) => Promise<string | undefined>;
   createFromTemplate: (template: Template) => Promise<string | undefined>;
   loadDesign: (id: string) => Promise<void>;
-  saveDesign: () => Promise<void>;
+  saveDesign: (opts?: { snapshot?: boolean }) => Promise<void>;
   deleteDesign: (id: string) => Promise<void>;
   renameDesign: (id: string, name: string) => Promise<void>;
   saving: boolean;
+  diskReloadEpoch: number;
+  diskNotice: string | null;
+  versions: DesignVersion[];
+  activeVersionRev: number | null;
+  saveVersion: (description: string) => Promise<{ version: DesignVersion; created: boolean } | null>;
+  deleteVersion: (rev: number) => Promise<void>;
+  switchVersion: (rev: number | null) => Promise<void>;
 
   // Pages
   pages: Page[];

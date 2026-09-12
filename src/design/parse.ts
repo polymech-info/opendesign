@@ -1,3 +1,4 @@
+import { STYLE_PROPS, stylePropsOnly } from "./props-sync";
 import {
   emptyDocument,
   type DesignDocument,
@@ -69,13 +70,13 @@ function makeNode(type: NodeType, id: string, props: Record<string, string>, ext
   return {
     id,
     type,
-    role: props.role,
+    role: extra?.role ?? props.role,
     parentId: extra?.parentId,
     widgetSource: extra?.widgetSource ?? props.widget,
     bounds: extra?.bounds ?? boundsFrom(props),
-    preset: props.preset,
-    style: props.style,
-    props: { ...props },
+    preset: extra?.preset ?? props.preset,
+    style: extra?.style ?? props.style,
+    props: stylePropsOnly(props),
     text: text?.startsWith("@") ? undefined : text,
     textBinding: extra?.textBinding ?? bindingKey(text),
     src: src?.startsWith("@") ? undefined : src,
@@ -149,6 +150,8 @@ export function instantiateWidget(
       parentId: instanceId,
       widgetSource: widgetId,
       role: tmpl.role,
+      preset: tmpl.preset,
+      style: tmpl.style,
       bounds: { x, y, w, h },
     });
     if (tmpl.type === "icon" && bind && !bind.startsWith("@")) node.props.icon = bind;
@@ -162,11 +165,14 @@ export function instantiateWidget(
   return { ok: true, id: instanceId };
 }
 
+type DeferredProp = { nodeId: string; prop: string; value: string };
+
 export function parseDsl(source: string): DesignDocument {
   const doc = emptyDocument();
   const lines = source.replace(/\r\n/g, "\n").split("\n");
   let i = 0;
   let pendingUse: { widget: string; id: string; origin: Rect; bindings: Record<string, string> } | null = null;
+  const deferredProps: DeferredProp[] = [];
 
   const flushUse = () => {
     if (!pendingUse) return;
@@ -225,6 +231,17 @@ export function parseDsl(source: string): DesignDocument {
       const lhs = trimmed.slice(0, eq).trim();
       const value = trimmed.slice(eq + 1).trim();
       const dot = lhs.lastIndexOf(".");
+      if (dot > 0) {
+        const prop = lhs.slice(dot + 1);
+        if (STYLE_PROPS.has(prop)) {
+          const nodeId = lhs.slice(0, dot);
+          const node = doc.nodes.find((n) => n.id === nodeId);
+          if (node) node.props[prop] = value;
+          else deferredProps.push({ nodeId, prop, value });
+          i += 1;
+          continue;
+        }
+      }
       const inst = lhs.slice(0, dot);
       const slot = lhs.slice(dot + 1);
       if (pendingUse && pendingUse.id === inst) pendingUse.bindings[slot] = value;
@@ -256,6 +273,10 @@ export function parseDsl(source: string): DesignDocument {
         width: parseNum(positional[1], 1920),
         height: parseNum(positional[2], 1080),
       };
+    } else if (first === "background") {
+      flushUse();
+      const raw = positional[0] || props.src || props.key || "";
+      if (raw) doc.pageBackground = raw;
     } else if (first === "theme") {
       flushUse();
       doc.theme = positional[0] || props.id || "";
@@ -319,5 +340,9 @@ export function parseDsl(source: string): DesignDocument {
     i += 1;
   }
   flushUse();
+  for (const item of deferredProps) {
+    const node = doc.nodes.find((n) => n.id === item.nodeId);
+    if (node) node.props[item.prop] = item.value;
+  }
   return doc;
 }

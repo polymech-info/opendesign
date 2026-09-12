@@ -12,14 +12,24 @@ import {
   ClipboardPaste,
   ClipboardCopy,
   Lock,
+  BringToFront,
+  SendToBack,
+  RotateCcw,
+  AlignStartVertical,
+  AlignEndVertical,
+  AlignStartHorizontal,
+  AlignEndHorizontal,
 } from "lucide-preact";
 import * as fabric from "fabric";
 import { useEditor } from "../context";
 import { readImageCornerRadius, readCornerRadius } from "../lib/image-radius";
-import { readStylePreset, readGlassOptions, STYLE_PRESETS } from "../lib/style-presets";
+import { readStylePreset, readGlassOptions, STYLE_PRESETS, IMAGE_STYLE_PRESETS } from "../lib/style-presets";
 import type { GlassOptions } from "../lib/style-presets";
 import { isIconObject, readIconFill, readIconStroke, readIconStrokeWidth, iconPreviewUrl } from "../lib/tabler-icons";
 import { selectedCanvasObjects } from "../lib/object-style";
+import { stackTargetsFromSelection } from "../lib/layer-stack";
+import { alignableSelection } from "../lib/align-objects";
+import { isCroppableImage, readImageCrop, resetImageCrop, setImageCropOrigin, setImageCropZoom } from "../lib/image-crop";
 import { isElementGroup, isInsideElementGroup, elementDisplayName } from "../lib/element-group";
 import { isBgImage } from "../lib/background-image";
 import { readElementSource, readObjectId } from "../lib/object-identity";
@@ -118,6 +128,94 @@ function SliderField({
         value={value}
         onInput={(e) => onChange(parseFloat((e.target as HTMLInputElement).value))}
       />
+    </div>
+  );
+}
+
+function ImageCropFields({
+  obj,
+  onCommit,
+}: {
+  obj: fabric.FabricImage;
+  onCommit: () => void;
+}) {
+  const crop = readImageCrop(obj);
+  const apply = (fn: (img: fabric.FabricImage) => void) => {
+    fn(obj);
+    obj.canvas?.requestRenderAll();
+    onCommit();
+  };
+  return (
+    <div class="flex flex-col gap-2">
+      <div class="flex items-center justify-between">
+        <label class="text-[11px] text-zinc-400 m-0">Crop</label>
+        <button
+          class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-medium border border-zinc-200 bg-white text-zinc-500 cursor-pointer hover:border-accent hover:text-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
+          disabled={!crop.cropped}
+          onClick={() => apply(resetImageCrop)}
+          title="Reset crop to the full image"
+        >
+          <RotateCcw size={11} />
+          Reset
+        </button>
+      </div>
+      <SliderField
+        label="Zoom"
+        value={crop.zoom}
+        min={crop.minZoom}
+        max={crop.maxZoom}
+        step={0.01}
+        suffix="×"
+        onChange={(zoom) => apply((img) => setImageCropZoom(img, zoom))}
+      />
+      <SliderField
+        label="Origin X"
+        value={crop.cropX}
+        min={0}
+        max={Math.max(crop.maxX, 1)}
+        step={1}
+        onChange={(x) => apply((img) => setImageCropOrigin(img, x, crop.cropY))}
+      />
+      <SliderField
+        label="Origin Y"
+        value={crop.cropY}
+        min={0}
+        max={Math.max(crop.maxY, 1)}
+        step={1}
+        onChange={(y) => apply((img) => setImageCropOrigin(img, crop.cropX, y))}
+      />
+      <div class="grid grid-cols-2 gap-1.5">
+        <label class="text-[10px] text-zinc-400 flex flex-col gap-0.5">
+          X
+          <input
+            type="number"
+            class="w-full bg-white border border-zinc-300 rounded-md text-xs text-zinc-700 px-2 py-1 outline-none focus:border-accent font-mono"
+            min={0}
+            max={Math.round(crop.maxX)}
+            value={Math.round(crop.cropX)}
+            onInput={(e) =>
+              apply((img) =>
+                setImageCropOrigin(img, Number((e.target as HTMLInputElement).value) || 0, crop.cropY)
+              )
+            }
+          />
+        </label>
+        <label class="text-[10px] text-zinc-400 flex flex-col gap-0.5">
+          Y
+          <input
+            type="number"
+            class="w-full bg-white border border-zinc-300 rounded-md text-xs text-zinc-700 px-2 py-1 outline-none focus:border-accent font-mono"
+            min={0}
+            max={Math.round(crop.maxY)}
+            value={Math.round(crop.cropY)}
+            onInput={(e) =>
+              apply((img) =>
+                setImageCropOrigin(img, crop.cropX, Number((e.target as HTMLInputElement).value) || 0)
+              )
+            }
+          />
+        </label>
+      </div>
     </div>
   );
 }
@@ -227,11 +325,12 @@ function StylePresetFields({
   onChange: (props: Record<string, unknown>) => void;
 }) {
   const current = readStylePreset(obj);
+  const presets = obj instanceof fabric.FabricImage ? IMAGE_STYLE_PRESETS : STYLE_PRESETS;
   return (
     <div>
       <label class="text-[11px] text-zinc-400 mb-1.5 block">Style preset</label>
       <div class="grid grid-cols-2 gap-1.5">
-        {STYLE_PRESETS.map((p) => (
+        {presets.map((p) => (
           <button
             key={p.id}
             class={`relative overflow-hidden rounded-lg border cursor-pointer px-2 py-2 text-left transition-all ${
@@ -251,6 +350,8 @@ function StylePresetFields({
                     "inset 0 0 0 1px rgba(180,230,255,0.8), 0 0 10px rgba(80,180,255,0.45), -4px 6px 12px rgba(255,120,70,0.25)",
                 }}
               />
+            ) : "swatch" in p && p.swatch ? (
+              <span class="block h-7 rounded-md mb-1.5" style={{ background: p.swatch }} />
             ) : (
               <span class="block h-7 rounded-md mb-1.5 bg-zinc-100 border border-zinc-200" />
             )}
@@ -418,6 +519,9 @@ export function RightSidebar() {
     groupSelected,
     ungroupSelected,
     saveSelectionAsElement,
+    bringSelectionToFront,
+    sendSelectionToBack,
+    alignSelected,
     canvas,
     setBackground,
     canvasWidth,
@@ -441,6 +545,8 @@ export function RightSidebar() {
   const selectedCount = selectedCanvasObjects(canvas, selectedObject).length;
   const canGroup = selectedCount >= 2;
   const canUngroup = isElementGroup(canvas?.getActiveObject() ?? null);
+  const canRestack = !!stackTargetsFromSelection(canvas, selectedObject);
+  const canAlign = alignableSelection(canvas, selectedObject).length >= 2;
 
   if (!selectedObject || isBg) {
     return (
@@ -542,6 +648,56 @@ export function RightSidebar() {
       <div class="p-4 flex flex-col gap-4">
         {(canGroup || canUngroup || selectedObject) && (
           <div class="flex flex-col gap-2">
+            <div class="flex gap-1">
+              <button
+                class="p-1.5 rounded-md text-zinc-500 bg-white border border-zinc-200 cursor-pointer hover:border-accent hover:text-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
+                disabled={!canRestack}
+                onClick={sendSelectionToBack}
+                title="Send selected to back (Ctrl+[)"
+              >
+                <SendToBack size={14} />
+              </button>
+              <button
+                class="p-1.5 rounded-md text-zinc-500 bg-white border border-zinc-200 cursor-pointer hover:border-accent hover:text-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
+                disabled={!canRestack}
+                onClick={bringSelectionToFront}
+                title="Bring selected to front (Ctrl+])"
+              >
+                <BringToFront size={14} />
+              </button>
+              <button
+                class="p-1.5 rounded-md text-zinc-500 bg-white border border-zinc-200 cursor-pointer hover:border-accent hover:text-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
+                disabled={!canAlign}
+                onClick={() => alignSelected("left")}
+                title="Align left to first selected"
+              >
+                <AlignStartVertical size={14} />
+              </button>
+              <button
+                class="p-1.5 rounded-md text-zinc-500 bg-white border border-zinc-200 cursor-pointer hover:border-accent hover:text-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
+                disabled={!canAlign}
+                onClick={() => alignSelected("right")}
+                title="Align right to first selected"
+              >
+                <AlignEndVertical size={14} />
+              </button>
+              <button
+                class="p-1.5 rounded-md text-zinc-500 bg-white border border-zinc-200 cursor-pointer hover:border-accent hover:text-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
+                disabled={!canAlign}
+                onClick={() => alignSelected("top")}
+                title="Align top to first selected"
+              >
+                <AlignStartHorizontal size={14} />
+              </button>
+              <button
+                class="p-1.5 rounded-md text-zinc-500 bg-white border border-zinc-200 cursor-pointer hover:border-accent hover:text-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
+                disabled={!canAlign}
+                onClick={() => alignSelected("bottom")}
+                title="Align bottom to first selected"
+              >
+                <AlignEndHorizontal size={14} />
+              </button>
+            </div>
             <div class="flex gap-1">
               <button
                 class="flex-1 px-2 py-1.5 rounded-md text-[11px] font-medium border border-zinc-200 bg-white cursor-pointer hover:border-accent disabled:opacity-30 disabled:cursor-not-allowed"
@@ -1027,6 +1183,12 @@ export function RightSidebar() {
         {/* ── Image properties ──────────────────────────────────────── */}
         {isImage && (
           <>
+            <p class="text-[10px] text-zinc-400 m-0">
+              Shift-drag to pan the crop. Shift-drag a corner to zoom inside the frame.
+            </p>
+            {isCroppableImage(selectedObject) && (
+              <ImageCropFields obj={selectedObject} onCommit={() => updateSelectedObject({})} />
+            )}
             <div>
               <label class="text-[11px] text-zinc-400 mb-1 block">Image</label>
               <div class="w-full h-16 rounded-md border border-zinc-200 bg-zinc-50 overflow-hidden mb-2">

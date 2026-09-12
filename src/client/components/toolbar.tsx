@@ -13,12 +13,35 @@ import {
   Group as GroupIcon,
   Ungroup as UngroupIcon,
   Library,
+  PanelLeft,
+  PanelRight,
+  BringToFront,
+  SendToBack,
 } from "lucide-preact";
 import { useEditor, CANVAS_SIZES } from "../context";
 import { isElementGroup } from "../lib/element-group";
 import { selectedCanvasObjects } from "../lib/object-style";
+import { stackTargetsFromSelection } from "../lib/layer-stack";
 
-export function Toolbar() {
+function panelBtnClass(open: boolean) {
+  return `p-1.5 rounded-md border-none cursor-pointer transition-all ${
+    open
+      ? "text-zinc-900 bg-zinc-100 hover:bg-zinc-200"
+      : "text-zinc-400 bg-transparent hover:bg-zinc-100 hover:text-zinc-900"
+  }`;
+}
+
+export function Toolbar({
+  leftPanelOpen,
+  rightPanelOpen,
+  onToggleLeftPanel,
+  onToggleRightPanel,
+}: {
+  leftPanelOpen: boolean;
+  rightPanelOpen: boolean;
+  onToggleLeftPanel: () => void;
+  onToggleRightPanel: () => void;
+}) {
   const {
     canvasWidth,
     canvasHeight,
@@ -37,6 +60,8 @@ export function Toolbar() {
     pages,
     saveDesign,
     saving,
+    diskNotice,
+    activeVersionRev,
     activeDesign,
     renameDesign,
     navigate,
@@ -46,6 +71,8 @@ export function Toolbar() {
     groupSelected,
     ungroupSelected,
     saveSelectionAsElement,
+    bringSelectionToFront,
+    sendSelectionToBack,
   } = useEditor();
   void selectionEpoch;
 
@@ -54,6 +81,7 @@ export function Toolbar() {
   const canGroup = selectedCount >= 2;
   const canUngroup = activeIsGroup;
   const canSaveElement = selectedCount >= 1 || activeIsGroup || !!selectedObject;
+  const canRestack = !!stackTargetsFromSelection(canvas, selectedObject);
 
   const [showSizeDropdown, setShowSizeDropdown] = useState(false);
   const [editingName, setEditingName] = useState(false);
@@ -123,6 +151,13 @@ export function Toolbar() {
         >
           <Home size={16} />
         </button>
+        <button
+          class={panelBtnClass(leftPanelOpen)}
+          onClick={onToggleLeftPanel}
+          title={leftPanelOpen ? "Hide left panel" : "Show left panel"}
+        >
+          <PanelLeft size={16} />
+        </button>
         {activeDesign && (
           editingName ? (
             <input
@@ -145,6 +180,15 @@ export function Toolbar() {
             </span>
           )
         )}
+        {activeVersionRev != null ? (
+          <span class="text-[11px] font-medium text-accent bg-accent/10 rounded-md px-2 py-0.5">
+            Version #{activeVersionRev}
+          </span>
+        ) : diskNotice ? (
+          <span class="text-[11px] font-medium text-accent bg-accent/10 rounded-md px-2 py-0.5">
+            {diskNotice}
+          </span>
+        ) : null}
 
         <div class="relative">
           <button
@@ -200,6 +244,25 @@ export function Toolbar() {
           title="Redo (Cmd+Shift+Z)"
         >
           <Redo2 size={16} />
+        </button>
+        <div class="w-px h-5 bg-zinc-300 mx-1" />
+        <button
+          class="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold border border-zinc-300 cursor-pointer transition-all bg-transparent text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 disabled:opacity-30 disabled:cursor-not-allowed"
+          onClick={sendSelectionToBack}
+          disabled={!canRestack}
+          title="Send selected to back (Ctrl+[)"
+        >
+          <SendToBack size={13} />
+          Back
+        </button>
+        <button
+          class="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold border border-zinc-300 cursor-pointer transition-all bg-transparent text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 disabled:opacity-30 disabled:cursor-not-allowed"
+          onClick={bringSelectionToFront}
+          disabled={!canRestack}
+          title="Bring selected to front (Ctrl+])"
+        >
+          <BringToFront size={13} />
+          Front
         </button>
         <div class="w-px h-5 bg-zinc-300 mx-1" />
         <button
@@ -284,6 +347,13 @@ export function Toolbar() {
         >
           {saving ? <span class="spinner !border-white/30 !border-t-white" /> : <Save size={13} />}
           {saving ? "Saving..." : "Save"}
+        </button>
+        <button
+          class={panelBtnClass(rightPanelOpen)}
+          onClick={onToggleRightPanel}
+          title={rightPanelOpen ? "Hide right panel" : "Show right panel"}
+        >
+          <PanelRight size={16} />
         </button>
       </div>
     </div>

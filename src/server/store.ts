@@ -1,10 +1,25 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import {
+  createDesignVersion,
+  deleteAllDesignVersions,
+  deleteDesignVersion,
+  getDesignVersion,
+  isDesignVersionFilename,
+  listDesignVersions,
+  restoreDesignVersion,
+  updateDesignVersion,
+  type DesignVersion,
+  type DesignVersionMeta,
+  type VersionKind,
+} from "./design-versions.js";
 import { jsonPath, mergeByKey, readJsonDir, readJsonFile, writeJsonFile } from "./json-files.js";
 import { layerRoot, mergeOrder, type Layer, type Roots } from "./paths.js";
 import { sanitizeCanvasJSONString } from "./sanitize-json.js";
 import { SEED_TEMPLATES } from "./seed-templates.js";
+
+const liveDesigns = { ignoreFile: isDesignVersionFilename };
 
 export type Source = "bundled" | Layer;
 
@@ -17,6 +32,14 @@ export type Page = {
   created_at: string;
 };
 
+export type DesignWriter = "editor" | "cli";
+
+export type DesignRevision = {
+  id: string;
+  updated_at: string;
+  updated_by?: DesignWriter;
+};
+
 export type Design = {
   id: string;
   name: string;
@@ -26,6 +49,7 @@ export type Design = {
   thumbnail_url: string | null;
   created_at: string;
   updated_at: string;
+  updated_by?: DesignWriter;
 };
 
 export type DesignRecord = Design & { pages: Page[]; source?: Source };
@@ -90,7 +114,7 @@ function deleteLayer(roots: Roots, folder: string, id: string) {
 
 export function listDesigns(roots: Roots): Design[] {
   const layers = mergeOrder(roots).map((entry) =>
-    readJsonDir<DesignRecord>(path.join(entry.root, "designs"), entry.layer)
+    readJsonDir<DesignRecord>(path.join(entry.root, "designs"), entry.layer, liveDesigns)
   );
   return mergeByKey((d) => d.id, ...layers)
     .map((row) => {
@@ -101,10 +125,18 @@ export function listDesigns(roots: Roots): Design[] {
 }
 
 export function getDesign(roots: Roots, id: string): DesignRecord | null {
+  if (isDesignVersionFilename(`${id}.json`)) return null;
   const hit = findInLayers<DesignRecord>(roots, "designs", id);
   if (!hit) return null;
+  if ("rev" in hit.row && "design_id" in hit.row && "kind" in hit.row) return null;
   const pages = [...(hit.row.pages ?? [])].sort((a, b) => a.sort_order - b.sort_order);
   return { ...hit.row, pages, source: hit.layer };
+}
+
+export function getDesignRevision(roots: Roots, id: string): DesignRevision | null {
+  const row = getDesign(roots, id);
+  if (!row) return null;
+  return { id: row.id, updated_at: row.updated_at, updated_by: row.updated_by };
 }
 
 export function createDesign(
@@ -141,7 +173,8 @@ export function createDesign(
 export function updateDesign(
   roots: Roots,
   id: string,
-  patch: Partial<Pick<Design, "name" | "canvas_json" | "width" | "height" | "thumbnail_url">>
+  patch: Partial<Pick<Design, "name" | "canvas_json" | "width" | "height" | "thumbnail_url">>,
+  updatedBy: DesignWriter = "editor",
 ): Design | null {
   const hit = findInLayers<DesignRecord>(roots, "designs", id);
   if (!hit) return null;
@@ -155,6 +188,7 @@ export function updateDesign(
     height: patch.height ?? hit.row.height,
     thumbnail_url: patch.thumbnail_url !== undefined ? patch.thumbnail_url : hit.row.thumbnail_url,
     updated_at: nowIso(),
+    updated_by: updatedBy,
     pages: hit.row.pages ?? [],
   };
   writeLayer(roots, "designs", hit.layer, next);
@@ -163,13 +197,15 @@ export function updateDesign(
 }
 
 export function deleteDesign(roots: Roots, id: string) {
+  deleteAllDesignVersions(roots, id);
   return deleteLayer(roots, "designs", id);
 }
 
-function saveDesignRecord(roots: Roots, layer: Layer, row: DesignRecord) {
+function saveDesignRecord(roots: Roots, layer: Layer, row: DesignRecord, updatedBy: DesignWriter = "editor") {
   writeLayer(roots, "designs", layer, {
     ...row,
     updated_at: nowIso(),
+    updated_by: updatedBy,
     canvas_json: row.pages[0]?.canvas_json ?? row.canvas_json,
   });
 }
@@ -206,7 +242,7 @@ export function addPage(
 
 export function getPage(roots: Roots, pageId: string): { page: Page; design: DesignRecord; layer: Layer } | null {
   for (const entry of [...mergeOrder(roots)].reverse()) {
-    for (const row of readJsonDir<DesignRecord>(path.join(entry.root, "designs"), entry.layer)) {
+    for (const row of readJsonDir<DesignRecord>(path.join(entry.root, "designs"), entry.layer, liveDesigns)) {
       const page = row.pages?.find((p) => p.id === pageId);
       if (page) return { page, design: row, layer: entry.layer };
     }
@@ -236,7 +272,8 @@ export function duplicatePage(roots: Roots, pageId: string): Page | null {
 export function updatePage(
   roots: Roots,
   pageId: string,
-  patch: { title?: string; canvas_json?: string }
+  patch: { title?: string; canvas_json?: string },
+  updatedBy: DesignWriter = "editor",
 ): Page | null {
   const hit = getPage(roots, pageId);
   if (!hit) return null;
@@ -249,7 +286,7 @@ export function updatePage(
         patch.canvas_json !== undefined ? sanitizeCanvasJSONString(patch.canvas_json) : page.canvas_json,
     };
   });
-  saveDesignRecord(roots, hit.layer, { ...hit.design, pages });
+  saveDesignRecord(roots, hit.layer, { ...hit.design, pages }, updatedBy);
   return pages.find((page) => page.id === pageId) ?? null;
 }
 
@@ -315,4 +352,60 @@ export function deleteElement(roots: Roots, id: string) {
 
 export function designOwningLayer(roots: Roots, id: string) {
   return owningLayer(roots, "designs", id);
+}
+
+export function listVersions(roots: Roots, designId: string): DesignVersionMeta[] {
+  if (!getDesign(roots, designId)) return [];
+  return listDesignVersions(roots, designId);
+}
+
+export function readVersion(roots: Roots, designId: string, rev: number): DesignVersion | null {
+  if (!getDesign(roots, designId)) return null;
+  return getDesignVersion(roots, designId, rev);
+}
+
+export function writeVersion(
+  roots: Roots,
+  designId: string,
+  rev: number,
+  patch: { canvas_json?: string; pages?: Array<{ id: string; canvas_json: string }> },
+): DesignVersion | null {
+  if (!getDesign(roots, designId)) return null;
+  return updateDesignVersion(roots, designId, rev, patch);
+}
+
+export function snapshotDesignVersion(
+  roots: Roots,
+  designId: string,
+  input: {
+    kind: VersionKind;
+    title?: string;
+    description?: string;
+    created_by?: DesignWriter;
+  },
+): { version: DesignVersionMeta; created: boolean } | null {
+  const design = getDesign(roots, designId);
+  if (!design) return null;
+  return createDesignVersion(roots, design, input);
+}
+
+export function removeDesignVersion(roots: Roots, designId: string, rev: number): boolean {
+  if (!getDesign(roots, designId)) return false;
+  return deleteDesignVersion(roots, designId, rev);
+}
+
+export function restoreVersion(
+  roots: Roots,
+  designId: string,
+  rev: number,
+  updatedBy: DesignWriter = "editor",
+): DesignRecord | null {
+  const live = getDesign(roots, designId);
+  const version = getDesignVersion(roots, designId, rev);
+  if (!live || !version) return null;
+  const next = restoreDesignVersion(roots, live, version, updatedBy);
+  const layer = live.source === "global" ? "global" : "project";
+  const { source: _source, ...row } = next;
+  writeLayer(roots, "designs", layer, row);
+  return { ...row, pages: [...(row.pages ?? [])].sort((a, b) => a.sort_order - b.sort_order), source: layer };
 }

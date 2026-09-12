@@ -11,6 +11,7 @@ import {
   Sparkles,
   Layers,
   MessageCircle,
+  History,
   ClipboardPaste,
   Shapes,
   Diamond,
@@ -22,6 +23,7 @@ import {
 import { useEditor } from "../context";
 import { TemplateCard } from "./template-card";
 import { DesignList } from "./design-list";
+import { VersionsPanel } from "./versions-panel";
 import { MediaLibrary } from "./media-library";
 import { LayersPanel } from "./layers-panel";
 import { IconsPanel } from "./icons-panel";
@@ -30,7 +32,7 @@ import { ChatPanel } from "../modules/ai/ChatPanel";
 import { GRADIENT_PRESETS } from "../lib/fill-presets";
 import type { ShapeKind } from "../lib/shapes";
 
-type Section = "chat" | "templates" | "text" | "shapes" | "icons" | "layers" | "images" | "background" | "designs";
+type Section = "chat" | "templates" | "text" | "shapes" | "icons" | "layers" | "images" | "background" | "designs" | "versions";
 
 const SECTIONS: { key: Section; icon: typeof LayoutGrid; label: string }[] = [
   { key: "chat", icon: MessageCircle, label: "Chat" },
@@ -42,6 +44,7 @@ const SECTIONS: { key: Section; icon: typeof LayoutGrid; label: string }[] = [
   { key: "images", icon: Upload, label: "Uploads" },
   { key: "background", icon: Palette, label: "Bg" },
   { key: "designs", icon: LayoutGrid, label: "Designs" },
+  { key: "versions", icon: History, label: "Versions" },
 ];
 
 const SECTION_TITLES: Record<Section, string> = {
@@ -54,6 +57,7 @@ const SECTION_TITLES: Record<Section, string> = {
   images: "Uploads",
   background: "Background",
   designs: "Designs",
+  versions: "Versions",
 };
 
 const BG_COLORS = [
@@ -275,6 +279,7 @@ export function LeftSidebar() {
                 )}
 
                 {activeSection === "designs" && <DesignList />}
+                {activeSection === "versions" && <VersionsPanel />}
               </div>
             </div>
           )}

@@ -2,12 +2,55 @@ import * as fabric from "fabric";
 import { applyIconFill, applyIconStroke, isIconObject } from "./tabler-icons";
 import { applyRectCornerRadius, readCornerRadius, traceRoundRectXY } from "./image-radius";
 
-export type StylePresetId = "none" | "glass";
+export type StylePresetId = "none" | "glass" | "grade" | "multiply" | "screen";
 
 export const STYLE_PRESETS: { id: StylePresetId; label: string }[] = [
   { id: "none", label: "None" },
   { id: "glass", label: "Glass" },
 ];
+
+export const IMAGE_STYLE_PRESETS: { id: StylePresetId; label: string; swatch?: string }[] = [
+  { id: "none", label: "None" },
+  { id: "glass", label: "Glass" },
+  {
+    id: "grade",
+    label: "Grade",
+    swatch: "linear-gradient(180deg, rgba(255,244,214,0.45), rgba(30,58,95,0.55))",
+  },
+  {
+    id: "multiply",
+    label: "Multiply",
+    swatch: "linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%)",
+  },
+  {
+    id: "screen",
+    label: "Screen",
+    swatch: "linear-gradient(180deg, #cbd5e1 0%, #334155 100%)",
+  },
+];
+
+const IMAGE_BLEND: Record<
+  Exclude<StylePresetId, "none" | "glass">,
+  { css: string; blend: GlobalCompositeOperation; opacity: number }
+> = {
+  grade: {
+    css: "linear-gradient(180deg, #FFF4D6 0%, #1E3A5F 100%)",
+    blend: "overlay",
+    opacity: 0.55,
+  },
+  multiply: {
+    css: "linear-gradient(135deg, #1E3A5F 0%, #0F172A 100%)",
+    blend: "multiply",
+    opacity: 0.42,
+  },
+  screen: {
+    css: "linear-gradient(180deg, #E2E8F0 0%, #334155 100%)",
+    blend: "screen",
+    opacity: 0.38,
+  },
+};
+
+const STYLE_IDS = new Set<StylePresetId>(["none", "glass", "grade", "multiply", "screen"]);
 
 const GLASS = {
   blurPx: 20,
@@ -166,7 +209,12 @@ export function readGlassOptions(obj: fabric.FabricObject): GlassOptions {
 export function applyGlassOptions(obj: fabric.FabricObject, partial: Partial<GlassOptions>) {
   const merged = { ...readGlassOptions(obj), ...partial };
   (obj as StyledObject)._glassOptions = merged;
-  if (!(obj instanceof fabric.FabricImage)) {
+  // Tint is an overlay for the glass draw pass. Only push it into fill when the
+  // caller is actually editing tint — never when just enabling glass.
+  if (
+    !(obj instanceof fabric.FabricImage) &&
+    ("tint" in partial || "tintOpacity" in partial)
+  ) {
     obj.set({ fill: hexToRgba(merged.tint, merged.tintOpacity) });
   }
   obj.dirty = true;
@@ -174,7 +222,7 @@ export function applyGlassOptions(obj: fabric.FabricObject, partial: Partial<Gla
 
 export function readStylePreset(obj: fabric.FabricObject): StylePresetId {
   const id = (obj as StyledObject)._stylePreset;
-  return id === "glass" ? "glass" : "none";
+  return id && STYLE_IDS.has(id) ? id : "none";
 }
 
 function isAnnotation(obj: fabric.FabricObject) {
@@ -443,6 +491,53 @@ function drawFlares(ctx: CanvasRenderingContext2D, obj: fabric.FabricObject) {
   });
 }
 
+function paintLocalGradient(
+  ctx: CanvasRenderingContext2D,
+  css: string,
+  w: number,
+  h: number
+) {
+  const angleMatch = css.match(/linear-gradient\(\s*([-\d.]+)deg/i);
+  const deg = angleMatch ? parseFloat(angleMatch[1]) : 180;
+  const stops = [...css.matchAll(/#([0-9a-f]{3,8})(?:\s+([\d.]+)%)?/gi)];
+  const rad = (deg * Math.PI) / 180;
+  const dx = Math.sin(rad);
+  const dy = -Math.cos(rad);
+  const half = (Math.abs(w * dx) + Math.abs(h * dy)) / 2;
+  const g = ctx.createLinearGradient(-dx * half, -dy * half, dx * half, dy * half);
+  if (stops.length === 0) {
+    g.addColorStop(0, "rgba(255,255,255,0.2)");
+    g.addColorStop(1, "rgba(15,23,42,0.45)");
+  } else {
+    stops.forEach((m, i, arr) => {
+      g.addColorStop(
+        m[2] != null ? parseFloat(m[2]) / 100 : i / Math.max(arr.length - 1, 1),
+        `#${m[1]}`
+      );
+    });
+  }
+  return g;
+}
+
+function drawImageBlend(
+  ctx: CanvasRenderingContext2D,
+  obj: fabric.FabricObject,
+  spec: { css: string; blend: GlobalCompositeOperation; opacity: number }
+) {
+  const w = obj.width || 0;
+  const h = obj.height || 0;
+  if (w <= 0 || h <= 0) return;
+  ctx.save();
+  ctx.beginPath();
+  traceObjectShape(ctx, obj);
+  ctx.clip();
+  ctx.globalCompositeOperation = spec.blend;
+  ctx.globalAlpha = spec.opacity;
+  ctx.fillStyle = paintLocalGradient(ctx, spec.css, w, h);
+  ctx.fillRect(-w / 2, -h / 2, w, h);
+  ctx.restore();
+}
+
 function installGlassDraw(obj: fabric.FabricObject) {
   const styled = obj as StyledObject;
   if (styled._glassDrawInstalled) return;
@@ -451,12 +546,21 @@ function installGlassDraw(obj: fabric.FabricObject) {
   obj.render = function (this: fabric.FabricObject, ctx: CanvasRenderingContext2D) {
     const orig = (this as StyledObject)._origRender;
     if (!orig) return;
-    if (
-      capturingBackdrop ||
-      this.isNotVisible() ||
-      (this as StyledObject)._stylePreset !== "glass"
-    ) {
+    const preset = readStylePreset(this);
+    if (capturingBackdrop || this.isNotVisible() || preset === "none") {
       orig.call(this, ctx);
+      return;
+    }
+    if (preset !== "glass") {
+      orig.call(this, ctx);
+      const blend = IMAGE_BLEND[preset as keyof typeof IMAGE_BLEND];
+      if (this instanceof fabric.FabricImage && blend) {
+        ctx.save();
+        this.transform(ctx);
+        this._setOpacity(ctx);
+        drawImageBlend(ctx, this, blend);
+        ctx.restore();
+      }
       return;
     }
     const isImage = this instanceof fabric.FabricImage;
@@ -479,6 +583,7 @@ function installGlassDraw(obj: fabric.FabricObject) {
 
 export function applyStylePreset(obj: fabric.FabricObject, preset: StylePresetId) {
   const styled = obj as StyledObject;
+  if (!STYLE_IDS.has(preset)) preset = "none";
   installGlassDraw(obj);
   invalidateGlassBackdrop(obj.canvas);
 
@@ -508,6 +613,13 @@ export function applyStylePreset(obj: fabric.FabricObject, preset: StylePresetId
     return;
   }
 
+  if (preset !== "glass") {
+    styled._stylePreset = preset;
+    obj.set({ objectCaching: false });
+    obj.dirty = true;
+    return;
+  }
+
   if (styled._stylePreset !== "glass") {
     styled._stylePresetBackup = {
       fill: obj.fill,
@@ -524,17 +636,7 @@ export function applyStylePreset(obj: fabric.FabricObject, preset: StylePresetId
   if (!(obj as StyledObject)._glassOptions) {
     (obj as StyledObject)._glassOptions = { ...DEFAULT_GLASS_OPTIONS };
   }
-  const glass = readGlassOptions(obj);
-  const next: Record<string, unknown> = {
-    stroke: "",
-    strokeWidth: 0,
-    shadow: null,
-    objectCaching: false,
-  };
-  if (!(obj instanceof fabric.FabricImage)) {
-    next.fill = hexToRgba(glass.tint, glass.tintOpacity);
-  }
-  obj.set(next);
+  obj.set({ objectCaching: false });
   if (obj instanceof fabric.Rect) {
     applyRectCornerRadius(obj, Math.max(readCornerRadius(obj), GLASS.cornerRadiusPx));
   }
@@ -544,11 +646,17 @@ export function applyStylePreset(obj: fabric.FabricObject, preset: StylePresetId
 export function restoreStylePresets(root: fabric.StaticCanvas | fabric.Group) {
   if (root instanceof fabric.Canvas) invalidateGlassBackdrop(root);
   for (const obj of root.getObjects()) {
-    ensureStyleRenderer(obj);
+    if (readStylePreset(obj) !== "none") {
+      installGlassDraw(obj);
+      obj.objectCaching = false;
+      obj.dirty = true;
+    } else {
+      ensureStyleRenderer(obj);
+    }
     if (obj instanceof fabric.Group) restoreStylePresets(obj);
   }
 }
 
 export function ensureStyleRenderer(obj: fabric.FabricObject) {
-  if (readStylePreset(obj) === "glass") installGlassDraw(obj);
+  if (readStylePreset(obj) !== "none") installGlassDraw(obj);
 }

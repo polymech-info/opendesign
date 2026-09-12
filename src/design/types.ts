@@ -46,6 +46,8 @@ export type PresetDefinition = {
 export type DesignDocument = {
   canvas: { id: string; width: number; height: number };
   theme: string;
+  /** Upload key e.g. uploads/backgrounds/hero-v1.png */
+  pageBackground?: string;
   widgets: Record<string, WidgetDefinition>;
   presets: Record<string, PresetDefinition>;
   nodes: DesignNode[];

@@ -13,10 +13,11 @@ interface PageCanvasProps {
 }
 
 export function PageCanvas({ page, isActive, width, height, onActivate }: PageCanvasProps) {
-  const { registerCanvas, unregisterCanvas } = useEditor();
+  const { registerCanvas, unregisterCanvas, diskReloadEpoch } = useEditor();
   const canvasElRef = useRef<HTMLCanvasElement>(null);
   const fabricRef = useRef<fabric.Canvas | null>(null);
   const onActivateRef = useRef(onActivate);
+  const loadedEpochRef = useRef(0);
   onActivateRef.current = onActivate;
 
   useEffect(() => {
@@ -164,6 +165,22 @@ export function PageCanvas({ page, isActive, width, height, onActivate }: PageCa
       fabricRef.current = null;
     };
   }, [page.id]);
+
+  useEffect(() => {
+    const c = fabricRef.current;
+    if (!c || diskReloadEpoch === loadedEpochRef.current) return;
+    loadedEpochRef.current = diskReloadEpoch;
+    if (!page.canvas_json || page.canvas_json === "{}") return;
+    void loadFabricJSON(c, page.canvas_json).then(() => {
+      c.getObjects().forEach((o) => {
+        if (o.shadow) {
+          o.objectCaching = false;
+          o.dirty = true;
+        }
+      });
+      c.requestRenderAll();
+    });
+  }, [diskReloadEpoch, page.canvas_json]);
 
   useEffect(() => {
     const c = fabricRef.current;

@@ -129,8 +129,11 @@ export async function ensureLlmServer(opts: { cwd: string; searchFrom: string })
     return { ...target, child: null, stop: () => {} };
   }
 
+  const logLevel = (process.env.OPEND_LLM_LOG_LEVEL || "trace").trim() || "trace";
   const args = [
     "--no-gui",
+    "--log-level",
+    logLevel,
     "--cwd",
     opts.cwd,
     "llm",
@@ -252,7 +255,41 @@ export async function proxyLlmRequest(c: Context, llm: LlmTarget) {
   }
 }
 
-export function mountLlmProxy(app: { all: (path: string, handler: (c: Context) => Response | Promise<Response>) => unknown }, llm: LlmTarget) {
+export async function proxyPathToolCall(c: Context, llm: LlmTarget) {
+  let body: Record<string, unknown> = {};
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ ok: false, error: "invalid JSON body" }, 400);
+  }
+  const name = typeof body.name === "string" ? body.name : "";
+  if (!name) return c.json({ ok: false, error: "'name' is required" }, 400);
+  const target = `${llm.url.replace(/\/$/, "")}/v1/llm/path-tools/call`;
+  const headers = new Headers({ "content-type": "application/json" });
+  if (llm.key) {
+    headers.set("authorization", `Bearer ${llm.key}`);
+    headers.set("x-api-key", llm.key);
+  }
+  if (llm.cwd) headers.set("x-tanit-cwd", llm.cwd);
+  try {
+    const upstream = await fetch(target, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ name, arguments: body.arguments ?? {} }),
+    });
+    const text = await upstream.text();
+    return new Response(text, {
+      status: upstream.status,
+      headers: { "content-type": upstream.headers.get("content-type") ?? "application/json" },
+    });
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    return c.json({ ok: false, error: `path tool proxy failed: ${detail}` }, 502);
+  }
+}
+
+export function mountLlmProxy(app: { all: (path: string, handler: (c: Context) => Response | Promise<Response>) => unknown; post?: (path: string, handler: (c: Context) => Response | Promise<Response>) => unknown }, llm: LlmTarget) {
   app.all("/api/llm/*", (c) => proxyLlmRequest(c, llm));
   app.all("/api/llm", (c) => proxyLlmRequest(c, llm));
+  if (app.post) app.post("/api/path-tools/call", (c) => proxyPathToolCall(c, llm));
 }

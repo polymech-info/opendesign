@@ -1,4 +1,7 @@
+import { coercePropValue, normalizePatchKey, patchFieldWarning } from "./patch-keys";
+import { STYLE_PROPS } from "./props-sync";
 import { matchingNodes } from "./query";
+import { resolveUploadKey, uploadPublicUrl } from "./upload-paths";
 import { cloneDocument, findNode, type DesignDocument, type DesignNode, type NodeType } from "./types";
 import { instantiateWidget } from "./parse";
 
@@ -38,28 +41,49 @@ export type CreateObject = {
   text?: string;
   src?: string;
   parent?: string;
+  /** Insert under existing cards / images (page photo stays at the back). */
+  behind?: boolean;
 };
 
 export type ToolResult = {
   ok: boolean;
   matched?: number;
   changed?: number;
+  /** Node ids targeted by the op (for in-canvas style sync without full reload). */
+  touched?: string[];
   created?: string[];
   deleted?: string[];
   diff?: Array<Record<string, unknown>>;
   errors?: Array<{ id?: string; operation?: number; error: string }>;
+  warnings?: Array<{ id?: string; field?: string; warning: string }>;
   objects?: Record<string, unknown>[];
 };
 
 const GEOM = new Set(["x", "y", "w", "h"]);
 
-function applyScalar(node: DesignNode, key: string, value: unknown): { from: unknown; to: unknown } | null {
-  if (key === "width") key = "w";
-  if (key === "height") key = "h";
-  const next = value == null ? undefined : String(value);
+function canvasGeom(doc: DesignDocument | undefined, node: DesignNode, key: string, n: number): number {
+  if (!doc || !node.parentId || (key !== "x" && key !== "y")) return n;
+  const parent = findNode(doc, node.parentId);
+  if (!parent) return n;
+  const origin = key === "x" ? parent.bounds.x : parent.bounds.y;
+  const size = key === "x" ? parent.bounds.w : parent.bounds.h;
+  if (n >= origin && n <= origin + size + 48) return n;
+  if (n >= 0 && n <= size) return origin + n;
+  return n;
+}
+
+function applyScalar(
+  node: DesignNode,
+  key: string,
+  value: unknown,
+  doc?: DesignDocument,
+): { from: unknown; to: unknown } | null {
+  key = normalizePatchKey(node, key);
+  const next = coercePropValue(value);
   if (GEOM.has(key)) {
-    const n = Number(value);
-    if (!Number.isFinite(n)) return null;
+    const raw = Number(value);
+    if (!Number.isFinite(raw)) return null;
+    const n = canvasGeom(doc, node, key, raw);
     const from = node.bounds[key as keyof typeof node.bounds];
     if (from === n) return null;
     node.bounds[key as keyof typeof node.bounds] = n;
@@ -192,6 +216,36 @@ function flattenCreate(spec: CreateObject): CreateObject {
   };
 }
 
+function propsFromCreateSpec(spec: CreateObject): Record<string, string> {
+  const rec = spec as Record<string, unknown>;
+  const props: Record<string, string> = {};
+  for (const key of STYLE_PROPS) {
+    if (rec[key] == null) continue;
+    const next = coercePropValue(rec[key]);
+    if (next != null) props[key] = next;
+  }
+  return props;
+}
+
+const STACK_SKIP = new Set<NodeType>(["canvas", "theme", "widget", "use"]);
+
+function insertCreatedNode(doc: DesignDocument, node: DesignNode, behind: boolean) {
+  if (!behind) {
+    doc.nodes.push(node);
+    return;
+  }
+  const idx = doc.nodes.findIndex((n) => !STACK_SKIP.has(n.type));
+  if (idx < 0) doc.nodes.push(node);
+  else doc.nodes.splice(idx, 0, node);
+}
+
+function restackNodeBehind(doc: DesignDocument, id: string) {
+  const idx = doc.nodes.findIndex((n) => n.id === id);
+  if (idx < 0) return;
+  const [node] = doc.nodes.splice(idx, 1);
+  insertCreatedNode(doc, node, true);
+}
+
 function objectFromSpec(spec: CreateObject): DesignNode {
   const flat = flattenCreate(spec);
   const text = flat.text;
@@ -209,7 +263,7 @@ function objectFromSpec(spec: CreateObject): DesignNode {
     },
     preset: flat.preset,
     style: flat.style,
-    props: {},
+    props: propsFromCreateSpec(flat),
     text: text?.startsWith("@") ? undefined : text,
     textBinding: text?.startsWith("@") ? text.slice(1) : undefined,
     src: src?.startsWith("@") ? undefined : src,
@@ -218,7 +272,12 @@ function objectFromSpec(spec: CreateObject): DesignNode {
   };
 }
 
-export function createObjects(doc: DesignDocument, objects: CreateObject[], dryRun = false): ToolResult {
+export function createObjects(
+  doc: DesignDocument,
+  objects: CreateObject[],
+  dryRun = false,
+  opts?: { behind?: boolean },
+): ToolResult {
   const errors: ToolResult["errors"] = [];
   const created: string[] = [];
   const target = dryRun ? cloneDocument(doc) : doc;
@@ -227,15 +286,28 @@ export function createObjects(doc: DesignDocument, objects: CreateObject[], dryR
       errors.push({ error: "create requires type and id" });
       continue;
     }
-    if (findNode(target, spec.id)) {
-      errors.push({ id: spec.id, error: `id already exists: ${spec.id}` });
-      continue;
-    }
-    if ((flattenCreate(spec).w ?? 0) < 0 || (flattenCreate(spec).h ?? 0) < 0) {
+    const flat = flattenCreate(spec);
+    const behind = Boolean(opts?.behind || spec.behind || (spec as { behind?: boolean }).behind);
+    if ((flat.w ?? 0) < 0 || (flat.h ?? 0) < 0) {
       errors.push({ id: spec.id, error: "width would become negative" });
       continue;
     }
-    target.nodes.push(objectFromSpec(spec));
+    const existing = findNode(target, spec.id);
+    if (existing) {
+      existing.bounds = {
+        x: flat.x ?? existing.bounds.x,
+        y: flat.y ?? existing.bounds.y,
+        w: flat.w ?? existing.bounds.w,
+        h: flat.h ?? existing.bounds.h,
+      };
+      if (flat.preset) existing.preset = flat.preset;
+      if (flat.style) existing.style = flat.style;
+      Object.assign(existing.props, propsFromCreateSpec(flat));
+      if (behind) restackNodeBehind(target, existing.id);
+      created.push(spec.id);
+      continue;
+    }
+    insertCreatedNode(target, objectFromSpec(spec), behind);
     created.push(spec.id);
   }
   if (errors.length && !dryRun) {
@@ -325,16 +397,19 @@ export function updateObjects(doc: DesignDocument, args: UpdateArgs): ToolResult
   const dry = Boolean(args.dry_run);
   const target = dry ? cloneDocument(doc) : doc;
   const diff: Array<Record<string, unknown>> = [];
+  const touched: string[] = [];
   const errors: NonNullable<ToolResult["errors"]> = [];
+  const warnings: NonNullable<ToolResult["warnings"]> = [];
   let matched = 0;
 
   const applyTo = (node: DesignNode, set?: Record<string, unknown>, transform?: Record<string, string | number>, replace?: Record<string, string>) => {
     matched += 1;
+    touched.push(node.id);
     const changes: Record<string, unknown> = { id: node.id };
     let changed = false;
     if (replace) {
       for (const [key, value] of Object.entries(replace)) {
-        const hit = applyScalar(node, key, value);
+        const hit = applyScalar(node, key, value, target);
         if (hit) {
           changes[key] = hit;
           changed = true;
@@ -343,9 +418,12 @@ export function updateObjects(doc: DesignDocument, args: UpdateArgs): ToolResult
     }
     if (set) {
       for (const [key, value] of Object.entries(set)) {
-        const hit = applyScalar(node, key, value);
+        const warn = patchFieldWarning(node, key);
+        if (warn) warnings.push({ id: node.id, field: key, warning: warn });
+        const normalized = normalizePatchKey(node, key);
+        const hit = applyScalar(node, normalized, value, target);
         if (hit) {
-          changes[key] = hit;
+          changes[normalized] = hit;
           changed = true;
         }
       }
@@ -369,8 +447,8 @@ export function updateObjects(doc: DesignDocument, args: UpdateArgs): ToolResult
   if (args.layout && args.where) {
     const laid = layoutObjects(target, args.where, args.layout);
     if (!laid.ok) return laid;
-    if (errors.length) return { ok: false, matched: laid.matched, changed: 0, errors, diff: dry ? laid.diff : undefined };
-    return { ok: true, matched: laid.matched, changed: laid.changed, diff: dry ? laid.diff : undefined };
+    if (errors.length) return { ok: false, matched: laid.matched, changed: 0, errors, diff: laid.diff };
+    return { ok: true, matched: laid.matched, changed: laid.changed, diff: laid.diff };
   }
 
   if (args.patches) {
@@ -387,8 +465,15 @@ export function updateObjects(doc: DesignDocument, args: UpdateArgs): ToolResult
     for (const node of nodes) applyTo(node, args.set, args.transform, args.replace);
   }
 
-  if (errors.length) return { ok: false, matched, changed: 0, errors, diff: dry ? diff : undefined };
-  return { ok: true, matched, changed: diff.length, diff: dry ? diff : undefined };
+  if (errors.length) return { ok: false, matched, changed: 0, touched, errors, warnings, diff };
+  return {
+    ok: true,
+    matched,
+    changed: diff.length,
+    touched,
+    warnings: warnings.length ? warnings : undefined,
+    diff,
+  };
 }
 
 export function deleteObjects(doc: DesignDocument, args: { where?: string; ids?: string[]; dry_run?: boolean }): ToolResult {
@@ -403,6 +488,141 @@ export function deleteObjects(doc: DesignDocument, args: { where?: string; ids?:
     for (const n of doc.nodes) n.children = n.children.filter((c) => !drop.has(c));
   }
   return { ok: true, matched: deleted.length, deleted, changed: args.dry_run ? 0 : deleted.length };
+}
+
+function storedPropValue(raw: string): unknown {
+  if (raw === "true") return true;
+  if (raw === "false") return false;
+  if (raw.startsWith("{") || raw.startsWith("[")) {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return raw;
+    }
+  }
+  return raw;
+}
+
+/** Copy style props from one widget instance to another (matched slots: bg, icon, title, …). */
+export function copyWidgetStyles(
+  doc: DesignDocument,
+  args: { from: string; to: string; slots?: string[] },
+): ToolResult {
+  const fromId = String(args.from ?? "").trim();
+  const toId = String(args.to ?? "").trim();
+  const fromUse = findNode(doc, fromId);
+  const toUse = findNode(doc, toId);
+  if (!fromUse || fromUse.type !== "use") {
+    return { ok: false, errors: [{ id: fromId, error: "from must be a widget instance (use) id" }] };
+  }
+  if (!toUse || toUse.type !== "use") {
+    return { ok: false, errors: [{ id: toId, error: "to must be a widget instance (use) id" }] };
+  }
+  const allow = args.slots?.map(String);
+  const diff: Array<Record<string, unknown>> = [];
+  const touched: string[] = [];
+  let matched = 0;
+  for (const toChild of doc.nodes.filter((n) => n.parentId === toId)) {
+    const slot = toChild.id.slice(toId.length + 1);
+    if (allow?.length && !allow.includes(slot)) continue;
+    const fromChild = doc.nodes.find((n) => n.id === `${fromId}.${slot}`);
+    if (!fromChild) continue;
+    matched += 1;
+    touched.push(toChild.id);
+    const changes: Record<string, unknown> = { id: toChild.id, slot };
+    let slotChanged = false;
+    if (fromChild.preset !== toChild.preset) {
+      changes.preset = { from: toChild.preset, to: fromChild.preset };
+      toChild.preset = fromChild.preset;
+      slotChanged = true;
+    }
+    if (fromChild.style !== toChild.style) {
+      changes.style = { from: toChild.style, to: fromChild.style };
+      toChild.style = fromChild.style;
+      slotChanged = true;
+    }
+    for (const key of STYLE_PROPS) {
+      const raw = fromChild.props[key];
+      if (raw == null) continue;
+      const hit = applyScalar(toChild, key, storedPropValue(raw));
+      if (hit) {
+        changes[key] = hit;
+        slotChanged = true;
+      }
+    }
+    if (slotChanged) diff.push(changes);
+  }
+  if (!matched) {
+    return { ok: false, errors: [{ error: `no matching slots between ${fromId} and ${toId}` }] };
+  }
+  return {
+    ok: true,
+    matched,
+    changed: diff.length,
+    touched,
+    diff,
+    from: fromId,
+    to: toId,
+    unchanged: matched > 0 && diff.length === 0,
+  };
+}
+
+export function setPageBackground(
+  doc: DesignDocument,
+  args: { src?: string; clear?: boolean },
+): ToolResult {
+  if (args.clear || !args.src?.trim()) {
+    const from = doc.pageBackground;
+    doc.pageBackground = undefined;
+    return { ok: true, changed: from ? 1 : 0, matched: 1 };
+  }
+  const key = resolveUploadKey(args.src);
+  const from = doc.pageBackground;
+  doc.pageBackground = key;
+  return {
+    ok: true,
+    changed: from === key ? 0 : 1,
+    matched: 1,
+    diff: [{ id: "canvas.photo", src: { from, to: uploadPublicUrl(key) } }],
+  };
+}
+
+export function replaceImageSrc(doc: DesignDocument, id: string, src: string): ToolResult {
+  const node = findNode(doc, id);
+  if (!node || node.type !== "img") {
+    return { ok: false, errors: [{ id, error: `not an image node: ${id}` }] };
+  }
+  const key = resolveUploadKey(src);
+  const to = uploadPublicUrl(key);
+  const from = node.imageBinding ? `@${node.imageBinding}` : node.src;
+  node.imageBinding = undefined;
+  node.src = to;
+  return { ok: true, changed: from === to ? 0 : 1, matched: 1, diff: [{ id, src: { from, to } }] };
+}
+
+export function insertImage(
+  doc: DesignDocument,
+  args: { id: string; src: string; x?: number; y?: number; w?: number; h?: number; fit?: string },
+): ToolResult {
+  const id = String(args.id ?? "").trim();
+  if (!id) return { ok: false, errors: [{ error: "design_insert_image requires id" }] };
+  if (findNode(doc, id)) return { ok: false, errors: [{ id, error: `id already exists: ${id}` }] };
+  const key = resolveUploadKey(args.src);
+  const node: DesignNode = {
+    id,
+    type: "img",
+    bounds: {
+      x: Number(args.x ?? 0),
+      y: Number(args.y ?? 0),
+      w: Number(args.w ?? 640),
+      h: Number(args.h ?? 480),
+    },
+    props: args.fit ? { fit: String(args.fit) } : {},
+    src: uploadPublicUrl(key),
+    children: [],
+  };
+  doc.nodes.push(node);
+  return { ok: true, created: [id], changed: 1, matched: 1 };
 }
 
 export function applyTransaction(

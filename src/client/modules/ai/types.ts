@@ -5,15 +5,24 @@ export interface ImageAttachment {
   isLocal?: boolean;
 }
 
+export interface ToolRunRecord {
+  name: string;
+  arguments: Record<string, unknown>;
+  result: unknown;
+}
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant" | "tool";
   content: string;
   timestamp: number;
   toolName?: string;
+  toolRuns?: ToolRunRecord[];
   isStreaming?: boolean;
   images?: ImageAttachment[];
   toolContext?: string;
+  /** Host-loop tool result — kept in API history, hidden from the transcript. */
+  hidden?: boolean;
 }
 
 export const fileToDataUrl = (file: File): Promise<string> =>

@@ -1,6 +1,15 @@
 import * as fabric from "fabric";
 
-export function canvasToPngDataUrl(canvas: fabric.StaticCanvas, multiplier = 2): string {
+export type CanvasExportOpts = {
+  format?: "png" | "jpeg";
+  multiplier?: number;
+  quality?: number;
+};
+
+export function canvasToDataUrl(canvas: fabric.StaticCanvas, opts?: CanvasExportOpts): string {
+  const format = opts?.format ?? "png";
+  const multiplier = opts?.multiplier ?? 1;
+  const quality = opts?.quality ?? (format === "jpeg" ? 0.72 : 1);
   const objects = canvas.getObjects();
   const prevCache = objects.map((o) => o.objectCaching);
   for (const obj of objects) {
@@ -9,13 +18,22 @@ export function canvasToPngDataUrl(canvas: fabric.StaticCanvas, multiplier = 2):
   }
   canvas.renderAll();
   const dataURL = canvas.toDataURL({
-    format: "png",
+    format,
     multiplier,
-    quality: 1,
+    quality,
     enableRetinaScaling: false,
   });
   objects.forEach((obj, i) => {
     obj.objectCaching = prevCache[i];
   });
   return dataURL;
+}
+
+export function canvasToPngDataUrl(canvas: fabric.StaticCanvas, multiplier = 2): string {
+  return canvasToDataUrl(canvas, { format: "png", multiplier, quality: 1 });
+}
+
+/** Compact JPEG for agent vision — not a download export. */
+export function canvasToScreenshotDataUrl(canvas: fabric.StaticCanvas): string {
+  return canvasToDataUrl(canvas, { format: "jpeg", multiplier: 0.5, quality: 0.72 });
 }

@@ -1,4 +1,4 @@
-import { Send, Square, Paperclip, Upload, X } from "lucide-preact";
+import { Send, Square, Paperclip, Upload, X, Loader2 } from "lucide-preact";
 import type { JSX, RefObject } from "preact";
 import type { ImageAttachment } from "../types";
 
@@ -84,6 +84,11 @@ export function ChatComposer({
       ) : null}
 
       <div class="flex gap-1.5 items-end">
+        {isGenerating ? (
+          <div class="h-8 w-8 shrink-0 flex items-center justify-center" title="Agent working…">
+            <Loader2 size={16} class="animate-spin text-accent" />
+          </div>
+        ) : null}
         <button
           type="button"
           class="h-8 w-8 shrink-0 rounded-md border-none bg-transparent text-zinc-400 hover:text-zinc-700 hover:bg-zinc-50 cursor-pointer"

@@ -7,6 +7,28 @@ export interface Design {
   thumbnail_url: string | null;
   created_at: string;
   updated_at: string;
+  updated_by?: "editor" | "cli";
+}
+
+export interface DesignRevision {
+  id: string;
+  updated_at: string;
+  updated_by?: "editor" | "cli";
+}
+
+export interface DesignVersion {
+  id: string;
+  design_id: string;
+  rev: number;
+  kind: "auto" | "manual";
+  title: string;
+  description: string;
+  created_at: string;
+  created_by: "editor" | "cli";
+  content_hash: string;
+  name: string;
+  width: number;
+  height: number;
 }
 
 export interface Page {
@@ -20,6 +42,12 @@ export interface Page {
 
 export interface DesignWithPages extends Design {
   pages: Page[];
+}
+
+export interface DesignVersionDetail extends DesignVersion {
+  canvas_json: string;
+  pages: Page[];
+  thumbnail_url?: string | null;
 }
 
 export interface Template {

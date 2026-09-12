@@ -51,7 +51,9 @@ export function App() {
     }
     const raw = designState.activePage?.canvas_json || designState.activeDesign?.canvas_json;
     setActiveDocument(documentFromCanvasJson(raw));
-  }, [designId, designState.activeDesign?.id, designState.activePage?.id, designState.activePage?.canvas_json]);
+    // Only rehydrate IR when the open design/page changes — not after save
+    // rewrites canvas_json, which would clobber in-memory style updates.
+  }, [designId, designState.activeDesign?.id, designState.activePage?.id]);
 
   useLayoutEffect(() => {
     if (!designState.activeDesign) return;

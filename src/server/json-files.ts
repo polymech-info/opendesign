@@ -30,12 +30,14 @@ export function writeJsonFile(file: string, data: unknown) {
 
 export function readJsonDir<T extends { id: string }>(
   dir: string,
-  layer: Layer
+  layer: Layer,
+  opts?: { ignoreFile?: (file: string) => boolean },
 ): Array<T & { source: Layer }> {
   if (!fs.existsSync(dir)) return [];
   const out: Array<T & { source: Layer }> = [];
   for (const file of fs.readdirSync(dir)) {
     if (!file.endsWith(".json")) continue;
+    if (opts?.ignoreFile?.(file)) continue;
     const row = readJsonFile<T>(path.join(dir, file));
     if (!row || typeof row !== "object" || !row.id) continue;
     out.push({ ...row, source: layer });

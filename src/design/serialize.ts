@@ -1,3 +1,4 @@
+import { serializeNodePropOverrides } from "./props-sync";
 import type { DesignDocument, DesignNode } from "./types";
 
 const PROP_ORDER = [
@@ -50,6 +51,7 @@ export function serializeDsl(doc: DesignDocument): string {
   const out: string[] = [];
   out.push(`canvas ${doc.canvas.id} ${doc.canvas.width} ${doc.canvas.height}`);
   if (doc.theme) out.push(`theme ${doc.theme}`);
+  if (doc.pageBackground) out.push(`background ${doc.pageBackground}`);
   out.push("");
   const presetIds = Object.keys(doc.presets).sort();
   for (const id of presetIds) {
@@ -83,6 +85,7 @@ export function serializeDsl(doc: DesignDocument): string {
         : child.textBinding ? `@${child.textBinding}`
         : child.props.icon || child.src || child.text;
       if (value) out.push(`${u.id}.${slot}=${value}`);
+      for (const line of serializeNodePropOverrides(child)) out.push(line);
     }
   }
   const keys = Object.keys(doc.content).sort();

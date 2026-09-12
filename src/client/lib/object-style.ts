@@ -75,14 +75,11 @@ export function captureObjectStyle(obj: fabric.FabricObject): CopiedObjectStyle 
       ? obj.stroke
       : undefined;
   const liveStrokeWidth = icon ? readIconStrokeWidth(obj) : obj.strokeWidth || 0;
-  const fill =
-    stylePreset === "glass" && typeof backup?.fill === "string" ? backup.fill : liveFill;
-  const stroke =
-    stylePreset === "glass" && typeof backup?.stroke === "string" ? backup.stroke : liveStroke;
+  const fill = liveFill || (typeof backup?.fill === "string" ? backup.fill : undefined);
+  const stroke = liveStroke || (typeof backup?.stroke === "string" ? backup.stroke : undefined);
   const strokeWidth =
-    stylePreset === "glass" && typeof backup?.strokeWidth === "number"
-      ? backup.strokeWidth
-      : liveStrokeWidth;
+    liveStrokeWidth ||
+    (typeof backup?.strokeWidth === "number" ? backup.strokeWidth : 0);
   const style: CopiedObjectStyle = {
     fill,
     stroke,
@@ -162,6 +159,13 @@ export function applyObjectStyle(obj: fabric.FabricObject, style: CopiedObjectSt
     applyStylePreset(obj, style.stylePreset);
     if (style.stylePreset === "glass") {
       applyGlassOptions(obj, style.glassOptions);
+      if (!icon && !image && style.fill) obj.set({ fill: style.fill });
+      if (!icon && !image) {
+        obj.set({
+          stroke: style.stroke ?? "",
+          strokeWidth: style.strokeWidth ?? 0,
+        });
+      }
     }
   }
 
@@ -180,10 +184,42 @@ export function selectedCanvasObjects(
   return fallback ? [fallback] : [];
 }
 
+const STYLE_PATCH_KEYS = new Set([
+  "fill",
+  "stroke",
+  "strokeWidth",
+  "rx",
+  "ry",
+  "_cornerRadius",
+  "shadow",
+  "objectCaching",
+  "_stylePreset",
+  "_glassOptions",
+  "fontSize",
+  "fontFamily",
+  "fontWeight",
+  "textAlign",
+  "_iconFill",
+  "opacity",
+  "text",
+]);
+
+/** Strip geometry / identity from projected Fabric JSON — safe for live style sync. */
+export function pickStylePatchProps(props: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(props)) {
+    if (STYLE_PATCH_KEYS.has(key)) out[key] = value;
+  }
+  return out;
+}
+
 export function applyObjectPatch(obj: fabric.FabricObject, props: Record<string, unknown>) {
   const next = { ...props };
+  delete next.type;
+  delete next.src;
+  delete next.version;
   if ("_stylePreset" in next) {
-    applyStylePreset(obj, next._stylePreset === "glass" ? "glass" : "none");
+    applyStylePreset(obj, String(next._stylePreset) as StylePresetId);
     delete next._stylePreset;
   }
   if ("_glassOptions" in next) {
@@ -209,6 +245,30 @@ export function applyObjectPatch(obj: fabric.FabricObject, props: Record<string,
     next._id = value ? uniqueIfTaken(value, taken) : nextUnique(objectKindSlug(obj), taken);
   }
   obj.set(next as Partial<fabric.FabricObject>);
+  if (readStylePreset(obj) === "glass" && ("fill" in props || "stroke" in props || "strokeWidth" in props)) {
+    const styled = obj as fabric.FabricObject & {
+      _stylePresetBackup?: {
+        fill: unknown;
+        stroke: unknown;
+        strokeWidth: number;
+        shadow: fabric.FabricObject["shadow"];
+        objectCaching: boolean;
+        rx?: number;
+        ry?: number;
+      };
+    };
+    const prev = styled._stylePresetBackup;
+    styled._stylePresetBackup = {
+      fill: "fill" in props ? obj.fill : prev?.fill ?? obj.fill,
+      stroke: "stroke" in props ? obj.stroke : prev?.stroke ?? obj.stroke,
+      strokeWidth: "strokeWidth" in props ? obj.strokeWidth || 0 : prev?.strokeWidth ?? (obj.strokeWidth || 0),
+      shadow: prev?.shadow ?? obj.shadow ?? null,
+      objectCaching: prev?.objectCaching ?? obj.objectCaching,
+      rx: obj instanceof fabric.Rect ? obj.rx : prev?.rx,
+      ry: obj instanceof fabric.Rect ? obj.ry : prev?.ry,
+    };
+  }
+  if ("text" in props) obj.dirty = true;
   if ("shadow" in props) {
     obj.objectCaching = props.shadow != null ? false : obj.objectCaching;
     obj.dirty = true;

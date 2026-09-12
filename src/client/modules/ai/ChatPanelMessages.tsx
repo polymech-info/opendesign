@@ -1,6 +1,8 @@
-import { useEffect, useRef } from "preact/hooks";
-import { Bot, Plus } from "lucide-preact";
+import { useCallback, useEffect, useRef, useState } from "preact/hooks";
+import { Bot, Check, ClipboardList, Plus } from "lucide-preact";
 import type { ChatEngineAPI } from "./useChatEngine";
+import { formatChatTranscript } from "./chatTranscript";
+import { messagesForDisplay } from "./chatTurns";
 import { ChatComposer } from "./components/ChatComposer";
 import { MessageBubble } from "./components/MessageBubble";
 import { ModelSelector } from "./components/ModelSelector";
@@ -8,6 +10,16 @@ import { ModelSelector } from "./components/ModelSelector";
 export function ChatMessages({ engine }: { engine: ChatEngineAPI }) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = engine.scrollRef;
+  const [transcriptCopied, setTranscriptCopied] = useState(false);
+
+  const copyTranscript = useCallback(() => {
+    const text = formatChatTranscript(engine.messages);
+    if (!text) return;
+    void navigator.clipboard.writeText(text).then(() => {
+      setTranscriptCopied(true);
+      setTimeout(() => setTranscriptCopied(false), 1500);
+    });
+  }, [engine.messages]);
 
   useEffect(() => {
     const el = scrollContainerRef.current;
@@ -45,6 +57,17 @@ export function ChatMessages({ engine }: { engine: ChatEngineAPI }) {
         </select>
         <button
           type="button"
+          class={`h-7 w-7 shrink-0 rounded-md border border-zinc-200 bg-white cursor-pointer disabled:opacity-40 ${
+            transcriptCopied ? "text-emerald-600 border-emerald-200" : "text-zinc-500 hover:text-accent hover:border-accent"
+          }`}
+          title={transcriptCopied ? "Copied!" : "Copy transcript (includes tool calls)"}
+          disabled={!engine.messages.length}
+          onClick={copyTranscript}
+        >
+          {transcriptCopied ? <Check size={14} /> : <ClipboardList size={14} />}
+        </button>
+        <button
+          type="button"
           class="h-7 w-7 shrink-0 rounded-md border border-zinc-200 bg-white text-zinc-500 hover:text-accent hover:border-accent cursor-pointer"
           title="New chat"
           onClick={engine.handleNewSession}
@@ -74,9 +97,7 @@ export function ChatMessages({ engine }: { engine: ChatEngineAPI }) {
             </p>
           </div>
         ) : (
-          engine.messages
-            .filter((msg) => msg.role !== "tool")
-            .map((msg) => (
+          messagesForDisplay(engine.messages).map((msg) => (
               <MessageBubble
                 key={msg.id}
                 message={msg}

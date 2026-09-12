@@ -69,7 +69,7 @@ export function deleteSession(id: string): void {
 }
 
 export function generateSessionTitle(messages: ChatMessage[]): string {
-  const firstUser = messages.find((m) => m.role === "user");
+  const firstUser = messages.find((m) => m.role === "user" && !m.hidden);
   if (!firstUser?.content) return "New Chat";
   const text = firstUser.content.slice(0, 60);
   return text.length < firstUser.content.length ? text + "…" : text;

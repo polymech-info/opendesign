@@ -12,11 +12,28 @@ import {
   type ChatSession,
 } from "./chatSessions";
 import {
-  assistantReplyForDesignTools,
-  formatDesignToolRuns,
-  isDesignToolOnlyReply,
+  assistantDisplayText,
+  dedupeToolCalls,
+  describeDesignToolJsonIssues,
+  looksTruncatedDesignToolJson,
+  countEmittedJsonObjects,
   parseEmittedToolCalls,
+  screenshotResultForLog,
+  shouldWarnDesignResponseTruncation,
+  stripDesignToolJsonFromText,
+  toolFollowUpFromRuns,
 } from "./designTools";
+import { appendStreamDelta, dedupeRepeatedContent } from "./streamText";
+import type { ToolRunRecord } from "./types";
+import type { ToolCall } from "./designTools";
+
+export type DesignToolRunContext = {
+  sessionId: string;
+  messageId: string;
+  finishReason: string | null;
+  parsedCalls: ToolCall[];
+  jsonObjectCount: number;
+};
 
 const HISTORY_KEY = "opend-chat-prompt-history";
 const MAX_HISTORY = 40;
@@ -78,7 +95,10 @@ export function useChatEngine(namespace = "opend") {
   const extraToolsRef = useRef<(() => any[]) | null>(null);
   const designContextRef = useRef<(() => string | null) | null>(null);
   const runDesignToolsRef = useRef<
-    ((text: string) => Promise<Array<{ name: string; result: unknown }>> | Array<{ name: string; result: unknown }>) | null
+    ((
+      text: string,
+      ctx: DesignToolRunContext,
+    ) => Promise<Array<{ name: string; result: unknown }>> | Array<{ name: string; result: unknown }>) | null
   >(null);
   const isUserScrolledUpRef = useRef(false);
 
@@ -215,10 +235,16 @@ export function useChatEngine(namespace = "opend") {
           parts.push({ type: "image_url", image_url: { url: img.url } });
         }
         apiMessages.push({ role: m.role, content: parts });
-      } else if (m.toolContext) {
-        apiMessages.push({ role: m.role, content: m.content + "\n\n" + m.toolContext });
       } else {
-        apiMessages.push({ role: m.role, content: m.content });
+        const extras: string[] = [];
+        if (m.toolContext) extras.push(m.toolContext);
+        if (m.toolRuns?.length) {
+          extras.push(m.toolRuns.map((r) => JSON.stringify({ name: r.name, result: r.result })).join("\n"));
+        }
+        apiMessages.push({
+          role: m.role,
+          content: extras.length ? [m.content, ...extras].filter(Boolean).join("\n\n") : m.content,
+        });
       }
     }
     return apiMessages;
@@ -238,7 +264,7 @@ export function useChatEngine(namespace = "opend") {
       let stream;
       try {
         stream = await client.chat.completions.create(
-          { model, messages: apiMessages, stream: true },
+          { model, messages: apiMessages, stream: true, max_tokens: 4096 },
           { signal },
         );
       } catch (err) {
@@ -249,11 +275,13 @@ export function useChatEngine(namespace = "opend") {
 
       let fullContent = "";
       let chunkIndex = 0;
+      let finishReason: string | null = null;
       try {
         for await (const chunk of stream) {
           chunkIndex += 1;
           const choices = chunk?.choices;
           const choice = Array.isArray(choices) ? choices[0] : undefined;
+          if (choice?.finish_reason) finishReason = String(choice.finish_reason);
           const delta = choice?.delta?.content || "";
           const odd = !Array.isArray(choices) || choices.length === 0;
           if (odd || chunkIndex <= 3) {
@@ -270,9 +298,11 @@ export function useChatEngine(namespace = "opend") {
             });
           }
           if (delta) {
-            fullContent += delta;
-            const snapshot = fullContent;
-            setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, content: snapshot } : m)));
+            fullContent = appendStreamDelta(fullContent, delta);
+            const display = stripDesignToolJsonFromText(fullContent);
+            setMessages((prev) =>
+              prev.map((m) => (m.id === assistantId ? { ...m, content: display, isStreaming: true } : m)),
+            );
           }
         }
       } catch (err) {
@@ -288,10 +318,12 @@ export function useChatEngine(namespace = "opend") {
         model,
         chunks: chunkIndex,
         chars: fullContent.length,
+        finishReason,
         ms: Math.round(performance.now() - started),
+        tail: fullContent.slice(-160),
       });
-      setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, isStreaming: false } : m)));
-      return fullContent;
+      fullContent = dedupeRepeatedContent(fullContent);
+      return { text: fullContent, finishReason };
     },
     [model],
   );
@@ -350,42 +382,126 @@ export function useChatEngine(namespace = "opend") {
           designBrief: brief,
         });
         // --serve ignores client tools[]; stream, then host-run any JSON tool_calls.
-        const text = (await runStreaming(client, apiMessages, assistantId, abort.signal)) || "";
-        const parsedCalls = parseEmittedToolCalls(text);
-        const ran = (await runDesignToolsRef.current?.(text)) ?? [];
-        const jsonOnly = isDesignToolOnlyReply(text);
-
-        setMessages((prev) =>
-          prev.map((m) => {
-            if (m.id !== assistantId) return m;
-            const done = { ...m, isStreaming: false };
-            if (!jsonOnly) return done;
-            if (ran.length) return { ...done, content: assistantReplyForDesignTools(ran) };
-            if (parsedCalls.length) {
-              return { ...done, content: "Couldn't apply that change — check the design is loaded." };
+        const historyForApi: ChatMessage[] = [...messages, userMsg];
+        const finishStream = async (
+          streamText: string,
+          finishReason: string | null,
+          currentAssistantId: string,
+          prior: ChatMessage[],
+          followFlags: { canFollowShot: boolean; canFollowUnderstand: boolean },
+        ): Promise<void> => {
+          const text = streamText || "";
+          const parsedCalls = parseEmittedToolCalls(text);
+          const ran =
+            (await runDesignToolsRef.current?.(text, {
+              sessionId,
+              messageId: currentAssistantId,
+              finishReason,
+              parsedCalls,
+              jsonObjectCount: countEmittedJsonObjects(text),
+            })) ?? [];
+          const truncatedJson = looksTruncatedDesignToolJson(text);
+          const jsonIssues = describeDesignToolJsonIssues(text);
+          const warnTruncation = shouldWarnDesignResponseTruncation({
+            truncatedJson,
+            finishReason,
+            runs: ran,
+            parsedCount: parsedCalls.length,
+          });
+          const toolCalls = dedupeToolCalls(parsedCalls).filter((c) => c.name !== "done");
+          const usedRuns = new Set<number>();
+          const toolRuns: ToolRunRecord[] = toolCalls.map((call) => {
+            let idx = ran.findIndex((row, i) => !usedRuns.has(i) && row.name === call.name);
+            if (idx < 0 && (call.name === "image_create" || call.name === "image_transform")) {
+              idx = ran.findIndex(
+                (row, i) =>
+                  !usedRuns.has(i) &&
+                  (row.name === "design_update" ||
+                    row.name === "design_set_page_background" ||
+                    row.name === "design_insert_image"),
+              );
             }
-            return { ...done, content: "Couldn't parse design tools from the response." };
-          }),
-        );
-
-        if (parsedCalls.length) {
-          const toolMsg: ChatMessage = {
-            id: crypto.randomUUID(),
-            role: "tool",
-            content: ran.length ? formatDesignToolRuns(ran) : "Design tools were parsed but did not run.",
+            if (idx >= 0) usedRuns.add(idx);
+            return {
+              name: call.name,
+              arguments: call.arguments,
+              result: idx >= 0 ? screenshotResultForLog(call.name, ran[idx].result) : { ok: false, error: "not run" },
+            };
+          });
+          const hadDesignJson = /design_[a-z_]+/i.test(text);
+          console.log("[Chat] design tools", {
+            finishReason,
+            chars: text.length,
+            truncatedJson,
+            warnTruncation,
+            jsonIssues,
+            parsed: parsedCalls.map((c) => c.name),
+            ran: ran.map((r) => ({ name: r.name, ok: (r.result as { ok?: boolean })?.ok })),
+            tail: text.slice(-200),
+          });
+          if (truncatedJson && !warnTruncation) {
+            console.warn("[Chat] trailing design JSON after successful tool run (not shown to user)", {
+              jsonIssues,
+            });
+          }
+          const display = assistantDisplayText(text, ran, {
+            truncated: warnTruncation,
+            parseFailed: hadDesignJson && !parsedCalls.length,
+          });
+          const assistantDone: ChatMessage = {
+            id: currentAssistantId,
+            role: "assistant",
+            content: display,
             timestamp: Date.now(),
-            toolName: [...new Set(parsedCalls.map((c) => c.name))].join(", "),
+            toolRuns: toolRuns.length ? toolRuns : undefined,
           };
-          setMessages((prev) => {
-            const idx = prev.findIndex((m) => m.id === assistantId);
-            if (idx === -1) return [...prev, toolMsg];
-            return [...prev.slice(0, idx), toolMsg, ...prev.slice(idx)];
+
+          setMessages((prev) =>
+            prev.map((m) => {
+              if (m.id !== currentAssistantId) return m;
+              return { ...m, isStreaming: false, content: display, toolRuns: toolRuns.length ? toolRuns : undefined };
+            }),
+          );
+
+          if (!parsedCalls.length && /design_[a-z_]+/i.test(text)) {
+            console.warn("[Chat] assistant emitted design tool JSON but host parsed 0 calls", {
+              text: text.slice(0, 240),
+            });
+          }
+
+          const follow = toolFollowUpFromRuns(ran, followFlags);
+          if (!follow || abort.signal.aborted) return;
+
+          const followUser: ChatMessage = {
+            id: crypto.randomUUID(),
+            role: "user",
+            content: follow.content,
+            timestamp: Date.now(),
+            hidden: true,
+          };
+          const followAssistantId = crypto.randomUUID();
+          const followAssistant: ChatMessage = {
+            id: followAssistantId,
+            role: "assistant",
+            content: "",
+            timestamp: Date.now(),
+            isStreaming: true,
+          };
+          setMessages((prev) => [...prev, followUser, followAssistant]);
+          const nextPrior = [...prior, assistantDone];
+          const nextApi = buildApiMessages(nextPrior, followUser);
+          const followOut = await runStreaming(client, nextApi, followAssistantId, abort.signal);
+          await finishStream(followOut?.text || "", followOut?.finishReason ?? null, followAssistantId, [...nextPrior, followUser], {
+            canFollowShot: false,
+            canFollowUnderstand: follow.kind === "screenshot",
           });
-        } else if (/design_[a-z_]+/i.test(text)) {
-          console.warn("[Chat] assistant emitted design tool JSON but host parsed 0 calls", {
-            text: text.slice(0, 240),
-          });
-        }
+        };
+
+        const streamOut = await runStreaming(client, apiMessages, assistantId, abort.signal);
+        await finishStream(streamOut?.text || "", streamOut?.finishReason ?? null, assistantId, historyForApi, {
+          canFollowShot: true,
+          canFollowUnderstand: true,
+        });
         setLlmReady(true);
       } catch (err: any) {
         if (err?.name === "AbortError" || String(err?.message || "").includes("aborted")) {
