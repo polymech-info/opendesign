@@ -19,6 +19,11 @@ import {
   AlignEndVertical,
   AlignStartHorizontal,
   AlignEndHorizontal,
+  Maximize2,
+  UnfoldHorizontal,
+  UnfoldVertical,
+  Eye,
+  EyeOff,
 } from "lucide-preact";
 import * as fabric from "fabric";
 import { useEditor } from "../context";
@@ -29,13 +34,14 @@ import { isIconObject, readIconFill, readIconStroke, readIconStrokeWidth, iconPr
 import { selectedCanvasObjects } from "../lib/object-style";
 import { stackTargetsFromSelection } from "../lib/layer-stack";
 import { alignableSelection } from "../lib/align-objects";
-import { isCroppableImage, readImageCrop, resetImageCrop, setImageCropOrigin, setImageCropZoom } from "../lib/image-crop";
+import { isCroppableImage, readImageCrop, setImageCropOrigin, setImageCropZoom } from "../lib/image-crop";
 import { isElementGroup, isInsideElementGroup, elementDisplayName } from "../lib/element-group";
 import { isBgImage } from "../lib/background-image";
 import { readElementSource, readObjectId } from "../lib/object-identity";
 import { FILL_COLORS, GRADIENT_PRESETS, OPACITY_PRESETS, PATTERN_PRESETS, gradientFillForObject, patternFillFromSvg } from "../lib/fill-presets";
 import { IconsPanel } from "./icons-panel";
 import { MediaLibrary } from "./media-library";
+import { PropSlider } from "./prop-slider";
 
 const FONT_FAMILIES = [
   "Inter",
@@ -92,15 +98,7 @@ function readShadow(obj: fabric.FabricObject) {
   };
 }
 
-function SliderField({
-  label,
-  value,
-  min,
-  max,
-  step,
-  suffix,
-  onChange,
-}: {
+function SliderField(props: {
   label: string;
   value: number;
   min: number;
@@ -109,27 +107,7 @@ function SliderField({
   suffix?: string;
   onChange: (v: number) => void;
 }) {
-  const pretty = step < 1 ? value.toFixed(2) : String(Math.round(value));
-  return (
-    <div>
-      <label class="text-[11px] text-zinc-400 mb-1 flex justify-between">
-        {label}
-        <span class="font-mono text-zinc-400">
-          {pretty}
-          {suffix ?? ""}
-        </span>
-      </label>
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        class="w-full accent-accent"
-        value={value}
-        onInput={(e) => onChange(parseFloat((e.target as HTMLInputElement).value))}
-      />
-    </div>
-  );
+  return <PropSlider {...props} />;
 }
 
 function ImageCropFields({
@@ -139,6 +117,7 @@ function ImageCropFields({
   obj: fabric.FabricImage;
   onCommit: () => void;
 }) {
+  const { resetSelectedImage } = useEditor();
   const crop = readImageCrop(obj);
   const apply = (fn: (img: fabric.FabricImage) => void) => {
     fn(obj);
@@ -150,10 +129,9 @@ function ImageCropFields({
       <div class="flex items-center justify-between">
         <label class="text-[11px] text-zinc-400 m-0">Crop</label>
         <button
-          class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-medium border border-zinc-200 bg-white text-zinc-500 cursor-pointer hover:border-accent hover:text-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
-          disabled={!crop.cropped}
-          onClick={() => apply(resetImageCrop)}
-          title="Reset crop to the full image"
+          class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-medium border border-zinc-200 bg-white text-zinc-500 cursor-pointer hover:border-accent hover:text-zinc-800"
+          onClick={resetSelectedImage}
+          title="Reset clip, origin, and size"
         >
           <RotateCcw size={11} />
           Reset
@@ -184,38 +162,6 @@ function ImageCropFields({
         step={1}
         onChange={(y) => apply((img) => setImageCropOrigin(img, crop.cropX, y))}
       />
-      <div class="grid grid-cols-2 gap-1.5">
-        <label class="text-[10px] text-zinc-400 flex flex-col gap-0.5">
-          X
-          <input
-            type="number"
-            class="w-full bg-white border border-zinc-300 rounded-md text-xs text-zinc-700 px-2 py-1 outline-none focus:border-accent font-mono"
-            min={0}
-            max={Math.round(crop.maxX)}
-            value={Math.round(crop.cropX)}
-            onInput={(e) =>
-              apply((img) =>
-                setImageCropOrigin(img, Number((e.target as HTMLInputElement).value) || 0, crop.cropY)
-              )
-            }
-          />
-        </label>
-        <label class="text-[10px] text-zinc-400 flex flex-col gap-0.5">
-          Y
-          <input
-            type="number"
-            class="w-full bg-white border border-zinc-300 rounded-md text-xs text-zinc-700 px-2 py-1 outline-none focus:border-accent font-mono"
-            min={0}
-            max={Math.round(crop.maxY)}
-            value={Math.round(crop.cropY)}
-            onInput={(e) =>
-              apply((img) =>
-                setImageCropOrigin(img, crop.cropX, Number((e.target as HTMLInputElement).value) || 0)
-              )
-            }
-          />
-        </label>
-      </div>
     </div>
   );
 }
@@ -441,64 +387,42 @@ function ShadowFields({
               />
             </div>
           </div>
-          <div>
-            <label class="text-[11px] text-zinc-400 mb-1 flex justify-between">
-              Opacity
-              <span class="font-mono text-zinc-400">{Math.round(current.opacity * 100)}%</span>
-            </label>
-            <input
-              type="range"
-              min="0"
-              max="1"
-              step="0.01"
-              class="w-full accent-accent"
-              value={current.opacity}
-              onInput={(e) => apply({ opacity: parseFloat((e.target as HTMLInputElement).value), enabled: true })}
-            />
-          </div>
-          <div>
-            <label class="text-[11px] text-zinc-400 mb-1 flex justify-between">
-              Blur
-              <span class="font-mono text-zinc-400">{Math.round(current.blur)}px</span>
-            </label>
-            <input
-              type="range"
-              min="0"
-              max="80"
-              class="w-full accent-accent"
-              value={current.blur}
-              onInput={(e) => apply({ blur: parseInt((e.target as HTMLInputElement).value, 10), enabled: true })}
-            />
-          </div>
+          <PropSlider
+            label="Opacity"
+            value={current.opacity}
+            min={0}
+            max={1}
+            step={0.01}
+            displayScale={100}
+            suffix="%"
+            onChange={(opacity) => apply({ opacity, enabled: true })}
+          />
+          <PropSlider
+            label="Blur"
+            value={current.blur}
+            min={0}
+            max={80}
+            step={1}
+            suffix="px"
+            onChange={(blur) => apply({ blur, enabled: true })}
+          />
           <div class="grid grid-cols-2 gap-2">
-            <div>
-              <label class="text-[11px] text-zinc-400 mb-1 flex justify-between">
-                X
-                <span class="font-mono text-zinc-400">{Math.round(current.offsetX)}</span>
-              </label>
-              <input
-                type="range"
-                min="-40"
-                max="40"
-                class="w-full accent-accent"
-                value={current.offsetX}
-                onInput={(e) => apply({ offsetX: parseInt((e.target as HTMLInputElement).value, 10), enabled: true })}
-              />
-            </div>
-            <div>
-              <label class="text-[11px] text-zinc-400 mb-1 flex justify-between">
-                Y
-                <span class="font-mono text-zinc-400">{Math.round(current.offsetY)}</span>
-              </label>
-              <input
-                type="range"
-                min="-40"
-                max="40"
-                class="w-full accent-accent"
-                value={current.offsetY}
-                onInput={(e) => apply({ offsetY: parseInt((e.target as HTMLInputElement).value, 10), enabled: true })}
-              />
-            </div>
+            <PropSlider
+              label="X"
+              value={current.offsetX}
+              min={-40}
+              max={40}
+              step={1}
+              onChange={(offsetX) => apply({ offsetX, enabled: true })}
+            />
+            <PropSlider
+              label="Y"
+              value={current.offsetY}
+              min={-40}
+              max={40}
+              step={1}
+              onChange={(offsetY) => apply({ offsetY, enabled: true })}
+            />
           </div>
         </>
       )}
@@ -522,6 +446,9 @@ export function RightSidebar() {
     bringSelectionToFront,
     sendSelectionToBack,
     alignSelected,
+    matchSelectedSize,
+    maximizeSelected,
+    resetSelectedImage,
     canvas,
     setBackground,
     canvasWidth,
@@ -669,7 +596,7 @@ export function RightSidebar() {
       <div class="p-4 flex flex-col gap-4">
         {(canGroup || canUngroup || selectedObject) && (
           <div class="flex flex-col gap-2">
-            <div class="flex gap-1">
+            <div class="flex flex-wrap gap-1">
               <button
                 class="p-1.5 rounded-md text-zinc-500 bg-white border border-zinc-200 cursor-pointer hover:border-accent hover:text-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
                 disabled={!canRestack}
@@ -717,6 +644,38 @@ export function RightSidebar() {
                 title="Align bottom to first selected"
               >
                 <AlignEndHorizontal size={14} />
+              </button>
+              <button
+                class="p-1.5 rounded-md text-zinc-500 bg-white border border-zinc-200 cursor-pointer hover:border-accent hover:text-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
+                disabled={!canAlign}
+                onClick={() => matchSelectedSize("width")}
+                title="Same width as first selected"
+              >
+                <UnfoldHorizontal size={14} />
+              </button>
+              <button
+                class="p-1.5 rounded-md text-zinc-500 bg-white border border-zinc-200 cursor-pointer hover:border-accent hover:text-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
+                disabled={!canAlign}
+                onClick={() => matchSelectedSize("height")}
+                title="Same height as first selected"
+              >
+                <UnfoldVertical size={14} />
+              </button>
+              <button
+                class="p-1.5 rounded-md text-zinc-500 bg-white border border-zinc-200 cursor-pointer hover:border-accent hover:text-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
+                disabled={!selectedObject}
+                onClick={maximizeSelected}
+                title="Maximize to canvas"
+              >
+                <Maximize2 size={14} />
+              </button>
+              <button
+                class="p-1.5 rounded-md text-zinc-500 bg-white border border-zinc-200 cursor-pointer hover:border-accent hover:text-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
+                disabled={!isCroppableImage(selectedObject)}
+                onClick={resetSelectedImage}
+                title="Reset clip, origin, and size"
+              >
+                <RotateCcw size={14} />
               </button>
             </div>
             <div class="flex gap-1">
@@ -806,20 +765,15 @@ export function RightSidebar() {
               </select>
             </div>
 
-            {/* Font size */}
-            <div>
-              <label class="text-[11px] text-zinc-400 mb-1 block">Font size</label>
-              <input
-                type="number"
-                class="w-full bg-white border border-zinc-300 rounded-md text-xs text-zinc-700 px-2 py-1.5 outline-none focus:border-accent"
-                value={(selectedObject as any).fontSize || 18}
-                onInput={(e) =>
-                  updateSelectedObject({
-                    fontSize: parseInt((e.target as HTMLInputElement).value) || 18,
-                  })
-                }
-              />
-            </div>
+            <PropSlider
+              label="Font size"
+              value={(selectedObject as any).fontSize || 18}
+              min={8}
+              max={200}
+              step={1}
+              suffix="px"
+              onChange={(fontSize) => updateSelectedObject({ fontSize })}
+            />
 
             {/* Bold / Italic / Underline */}
             <div>
@@ -918,47 +872,22 @@ export function RightSidebar() {
               </div>
             </div>
 
-            {/* Line height */}
-            <div>
-              <label class="text-[11px] text-zinc-400 mb-1 flex justify-between">
-                Line height
-                <span class="text-zinc-400 font-mono">{((selectedObject as any).lineHeight || 1.2).toFixed(1)}</span>
-              </label>
-              <input
-                type="range"
-                min="0.8"
-                max="3"
-                step="0.1"
-                class="w-full accent-accent"
-                value={(selectedObject as any).lineHeight || 1.2}
-                onInput={(e) =>
-                  updateSelectedObject({
-                    lineHeight: parseFloat((e.target as HTMLInputElement).value),
-                  })
-                }
-              />
-            </div>
-
-            {/* Letter spacing */}
-            <div>
-              <label class="text-[11px] text-zinc-400 mb-1 flex justify-between">
-                Letter spacing
-                <span class="text-zinc-400 font-mono">{(selectedObject as any).charSpacing || 0}</span>
-              </label>
-              <input
-                type="range"
-                min="-200"
-                max="800"
-                step="10"
-                class="w-full accent-accent"
-                value={(selectedObject as any).charSpacing || 0}
-                onInput={(e) =>
-                  updateSelectedObject({
-                    charSpacing: parseInt((e.target as HTMLInputElement).value),
-                  })
-                }
-              />
-            </div>
+            <PropSlider
+              label="Line height"
+              value={(selectedObject as any).lineHeight || 1.2}
+              min={0.8}
+              max={3}
+              step={0.1}
+              onChange={(lineHeight) => updateSelectedObject({ lineHeight })}
+            />
+            <PropSlider
+              label="Letter spacing"
+              value={(selectedObject as any).charSpacing || 0}
+              min={-200}
+              max={800}
+              step={10}
+              onChange={(charSpacing) => updateSelectedObject({ charSpacing })}
+            />
             <ShadowFields obj={selectedObject} onChange={updateSelectedObject} />
           </>
         )}
@@ -1143,24 +1072,15 @@ export function RightSidebar() {
 
             {/* Border radius (for rect) */}
             {selectedObject instanceof fabric.Rect && (
-              <div>
-                <label class="text-[11px] text-zinc-400 mb-1 flex justify-between">
-                  Corner radius
-                  <span class="text-zinc-400 font-mono">{Math.round(readCornerRadius(selectedObject))}px</span>
-                </label>
-                <input
-                  type="range"
-                  min="0"
-                  max="120"
-                  class="w-full accent-accent"
-                  value={readCornerRadius(selectedObject)}
-                  onInput={(e) =>
-                    updateSelectedObject({
-                      _cornerRadius: parseInt((e.target as HTMLInputElement).value, 10) || 0,
-                    })
-                  }
-                />
-              </div>
+              <PropSlider
+                label="Corner radius"
+                value={readCornerRadius(selectedObject)}
+                min={0}
+                max={120}
+                step={1}
+                suffix="px"
+                onChange={(radius) => updateSelectedObject({ _cornerRadius: radius })}
+              />
             )}
 
             {isIcon && (
@@ -1241,24 +1161,15 @@ export function RightSidebar() {
               <ClipboardPaste size={14} class="text-zinc-400" />
               <span class="text-[11px] text-zinc-600">Paste to replace</span>
             </button>
-            <div>
-              <label class="text-[11px] text-zinc-400 mb-1 flex justify-between">
-                Border radius
-                <span class="text-zinc-400 font-mono">{Math.round(readImageCornerRadius(selectedObject))}px</span>
-              </label>
-              <input
-                type="range"
-                min="0"
-                max="120"
-                class="w-full accent-accent"
-                value={readImageCornerRadius(selectedObject)}
-                onInput={(e) =>
-                  updateSelectedObject({
-                    _cornerRadius: parseInt((e.target as HTMLInputElement).value, 10) || 0,
-                  })
-                }
-              />
-            </div>
+            <PropSlider
+              label="Border radius"
+              value={readImageCornerRadius(selectedObject)}
+              min={0}
+              max={120}
+              step={1}
+              suffix="px"
+              onChange={(radius) => updateSelectedObject({ _cornerRadius: radius })}
+            />
             <div>
               <label class="text-[11px] text-zinc-400 mb-1 block">Flip</label>
               <div class="flex gap-1">
@@ -1288,13 +1199,24 @@ export function RightSidebar() {
           </>
         )}
 
-        {/* ── Common: Opacity ───────────────────────────────────────── */}
+        {/* ── Common: Visible + Opacity ─────────────────────────────── */}
         <div>
-          <label class="text-[11px] text-zinc-400 mb-1 flex justify-between">
-            Opacity
-            <span class="text-zinc-400 font-mono">{Math.round((selectedObject.opacity ?? 1) * 100)}%</span>
-          </label>
-          <div class="flex gap-1 mb-1.5">
+          <label class="text-[11px] text-zinc-400 mb-1 block">Visible</label>
+          <button
+            class={`w-full inline-flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] font-medium border cursor-pointer ${
+              selectedObject.visible !== false
+                ? "border-zinc-200 bg-white text-zinc-700 hover:border-accent"
+                : "border-accent bg-accent/10 text-zinc-800"
+            }`}
+            onClick={() => updateSelectedObject({ visible: selectedObject.visible === false })}
+            title={selectedObject.visible === false ? "Show" : "Hide"}
+          >
+            {selectedObject.visible === false ? <EyeOff size={13} /> : <Eye size={13} />}
+            {selectedObject.visible === false ? "Hidden" : "Shown"}
+          </button>
+        </div>
+        <div class="flex flex-col gap-1.5">
+          <div class="flex gap-1">
             {OPACITY_PRESETS.map((value) => (
               <button
                 key={value}
@@ -1309,18 +1231,15 @@ export function RightSidebar() {
               </button>
             ))}
           </div>
-          <input
-            type="range"
-            min="0"
-            max="1"
-            step="0.01"
-            class="w-full accent-accent"
+          <PropSlider
+            label="Opacity"
             value={selectedObject.opacity ?? 1}
-            onInput={(e) =>
-              updateSelectedObject({
-                opacity: parseFloat((e.target as HTMLInputElement).value),
-              })
-            }
+            min={0}
+            max={1}
+            step={0.01}
+            displayScale={100}
+            suffix="%"
+            onChange={(opacity) => updateSelectedObject({ opacity })}
           />
         </div>
       </div>

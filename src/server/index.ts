@@ -28,7 +28,7 @@ import { mountAgentTools } from "./agent-tools.js";
 import { appendDesignJournal, readDesignJournal } from "./design-journal.js";
 import { mcpDeleteResponse, mcpGetResponse, mcpOptionsResponse, mcpPostResponse } from "../mcp/http.js";
 import { loadProjectGuides } from "./project-guides.js";
-import { imageBytesFromDataUrl, pngBytesFromDataUrl, writeProjectDesignPng } from "./project-png.js";
+import { imageBytesFromDataUrl, pngBytesFromDataUrl, writeDocsAssetScreenshot, writeProjectDesignPng } from "./project-png.js";
 
 export type AppOptions = {
   roots: Roots;
@@ -620,6 +620,15 @@ Lists MERGE both folders (union). Same id/filename: project copy is used; unique
     if (!bytes) return c.json({ error: "Expected a PNG data URL" }, 400);
     if (bytes.length > 25 * 1024 * 1024) return c.json({ error: "PNG too large" }, 413);
     return c.json(writeProjectDesignPng(roots, name, bytes), 200);
+  });
+
+  app.post("/api/export/app-screenshot", async (c) => {
+    const body = (await c.req.json().catch(() => null)) as { image?: unknown } | null;
+    const image = typeof body?.image === "string" ? body.image : "";
+    const bytes = pngBytesFromDataUrl(image);
+    if (!bytes) return c.json({ error: "Expected a PNG data URL" }, 400);
+    if (bytes.length > 25 * 1024 * 1024) return c.json({ error: "PNG too large" }, 413);
+    return c.json(writeDocsAssetScreenshot(roots, bytes), 200);
   });
 
   app.get("/api/uploads", (c) => {

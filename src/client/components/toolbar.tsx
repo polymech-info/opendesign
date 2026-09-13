@@ -9,6 +9,7 @@ import {
   FileJson,
   Copy,
   ClipboardCopy,
+  Camera,
   Save,
   ChevronDown,
   Home,
@@ -24,6 +25,7 @@ import { useEditor, CANVAS_SIZES } from "../context";
 import { isElementGroup } from "../lib/element-group";
 import { selectedCanvasObjects } from "../lib/object-style";
 import { stackTargetsFromSelection } from "../lib/layer-stack";
+import { saveAppScreenshot } from "../lib/capture-app";
 
 function panelBtnClass(open: boolean) {
   return `p-1.5 rounded-md border-none cursor-pointer transition-all ${
@@ -91,6 +93,7 @@ export function Toolbar({
   const [showSizeDropdown, setShowSizeDropdown] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState("");
+  const [capturingApp, setCapturingApp] = useState(false);
 
   const currentSize = CANVAS_SIZES.find(
     (s) => s.width === canvasWidth && s.height === canvasHeight
@@ -387,6 +390,21 @@ export function Toolbar({
         >
           {saving ? <span class="spinner !border-white/30 !border-t-white" /> : <Save size={13} />}
           {saving ? "Saving..." : "Save"}
+        </button>
+        <button
+          class="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-semibold border border-zinc-300 cursor-pointer transition-all bg-transparent text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 disabled:opacity-50 disabled:cursor-not-allowed"
+          disabled={capturingApp}
+          onClick={() => {
+            setCapturingApp(true);
+            void saveAppScreenshot()
+              .then((written) => flashNotice(written.relative))
+              .catch((e) => flashNotice(e instanceof Error ? e.message : "Could not save screenshot"))
+              .finally(() => setCapturingApp(false));
+          }}
+          title="Capture the visible Chrome tab via Tanit Inspector → docs/assets/screenshot_n.png"
+        >
+          <Camera size={13} />
+          {capturingApp ? "Capturing..." : "Shot"}
         </button>
         <button
           class={panelBtnClass(rightPanelOpen)}

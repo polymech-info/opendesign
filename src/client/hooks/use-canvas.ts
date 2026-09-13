@@ -35,7 +35,7 @@ import {
   setElementGroupsCtrlPick,
   ungroupElement,
 } from "../lib/element-group";
-import { swapCanvasObject } from "../lib/object-frame";
+import { captureObjectFrame, swapCanvasObject } from "../lib/object-frame";
 import { ensureObjectIdentity, readObjectId, retargetCloneTree, type IdentifiedObject } from "../lib/object-identity";
 import {
   captureCopiedObjects,
@@ -46,7 +46,14 @@ import {
   writeCopiedObjectsToClipboard,
 } from "../lib/copy-objects";
 import { installSnapGuides } from "../lib/snap-guides";
-import { installImageCropGestures } from "../lib/image-crop";
+import {
+  applyImageCropTransfer,
+  captureImageCropTransfer,
+  findCroppableImageAt,
+  installImageCropGestures,
+  isCroppableImage,
+  resetImageFrame,
+} from "../lib/image-crop";
 import { cssLinearToFabricGradient } from "../lib/fill-presets";
 import { createShapeObject, type ShapeKind } from "../lib/shapes";
 import { api } from "../api";
@@ -61,7 +68,8 @@ import {
 } from "../lib/background-image";
 import { patchPageBackgroundInIr, syncImageNodeInIr, syncObjectStyleInIr, syncStackOrderInIr } from "../lib/design-ir-sync";
 import { restackSelection, type StackDirection } from "../lib/layer-stack";
-import { alignSelectionToFirst, type AlignEdge } from "../lib/align-objects";
+import { alignSelectionToFirst, matchSelectionSizeToFirst, type AlignEdge, type MatchSizeAxis } from "../lib/align-objects";
+import { maximizeSelection } from "../lib/maximize-object";
 import {
   attachDesignDocument,
   documentFromCanvasJson,
@@ -102,6 +110,7 @@ export interface LayerItem {
   id: string;
   name: string;
   kind: string;
+  visible: boolean;
 }
 
 function layerName(obj: fabric.FabricObject): string {
@@ -269,7 +278,29 @@ export function useCanvasState() {
           : null;
       pointerPickRef.current = { ctrl, inner, prevActive, subTargets };
     });
-    canvas.on("mouse:down", () => {
+    canvas.on("mouse:down", (opt) => {
+      const evt = opt.e as MouseEvent | undefined;
+      if (evt?.button === 2) {
+        abortCanvasTransform(canvas);
+        const target = opt.target && !isBgImage(opt.target) ? opt.target : null;
+        if (target) {
+          const selected = canvas.getActiveObjects();
+          if (!selected.includes(target) && canvas.getActiveObject() !== target) {
+            canvas.setActiveObject(target);
+            setSelectedObject(target);
+            setSelectionEpoch((n) => n + 1);
+          }
+        } else {
+          canvas.discardActiveObject();
+          setSelectedObject(null);
+          setSelectionEpoch((n) => n + 1);
+        }
+        canvas.requestRenderAll();
+        window.dispatchEvent(
+          new CustomEvent("opend-context-menu", { detail: { x: evt.clientX, y: evt.clientY } })
+        );
+        return;
+      }
       const pick = pointerPickRef.current;
       if (!pick?.inner) return;
       if (pick.prevActive !== pick.inner) {
@@ -538,9 +569,37 @@ export function useCanvasState() {
     [getActiveCanvas, canvasWidth, canvasHeight, placeIconObject, saveHistory]
   );
 
+  const commitReplacedImage = useCallback(
+    async (canvas: fabric.Canvas, pageId: string, target: fabric.FabricImage, url: string) => {
+      const img = await fabric.FabricImage.fromURL(url, { crossOrigin: "anonymous" });
+      await normalizeFabricImageSize(img);
+      const style = captureObjectStyle(target);
+      const radius = readImageCornerRadius(target);
+      applyObjectStyle(img, style);
+      const id = readObjectId(target);
+      const frame = captureObjectFrame(target);
+      const transfer = isCroppableImage(target) ? captureImageCropTransfer(target) : null;
+      swapCanvasObject(canvas, target, img);
+      if (id) (img as { _id?: string })._id = id;
+      applyImageCornerRadius(img, radius);
+      if (transfer) applyImageCropTransfer(img, transfer, frame);
+      ensureStyleRenderer(img);
+      syncImageNodeInIr(img);
+      canvas.setActiveObject(img);
+      canvas.requestRenderAll();
+      saveHistory(pageId);
+      setSelectedObject(img);
+      setSelectionEpoch((n) => n + 1);
+    },
+    [saveHistory]
+  );
+
   const addDroppedImages = useCallback(
     async (files: File[], at?: { pageId?: string; left?: number; top?: number }) => {
       if (at?.pageId) setActiveCanvas(at.pageId);
+      const pageId = at?.pageId || activeCanvasIdRef.current;
+      const canvas = pageId ? canvasMapRef.current.get(pageId) ?? null : getActiveCanvas();
+      let replaced = false;
       let i = 0;
       for (const file of files) {
         const left = at?.left != null ? at.left + i * 28 : undefined;
@@ -562,12 +621,34 @@ export function useCanvasState() {
         }
         const url = await uploadImageFile(file, "images");
         if (!url) continue;
+        const target =
+          !replaced && canvas && pageId && left != null && top != null
+            ? findCroppableImageAt(canvas, left, top)
+            : null;
+        if (target) {
+          try {
+            await commitReplacedImage(canvas, pageId, target, url);
+            replaced = true;
+          } catch (e) {
+            console.error("Failed to replace image:", e);
+          }
+          continue;
+        }
         await addImage(url, { fit: 0.6, left, top });
         i += 1;
       }
     },
-    [addImage, setActiveCanvas, placeIconObject, canvasWidth, canvasHeight]
+    [addImage, setActiveCanvas, placeIconObject, canvasWidth, canvasHeight, getActiveCanvas, commitReplacedImage]
   );
+
+  const readImageDropTarget = useCallback((pageId: string, left: number, top: number) => {
+    const canvas = canvasMapRef.current.get(pageId);
+    if (!canvas) return null;
+    const img = findCroppableImageAt(canvas, left, top);
+    if (!img) return null;
+    const box = img.getBoundingRect();
+    return { pageId, left: box.left, top: box.top, width: box.width, height: box.height };
+  }, []);
 
   const replaceSelectedImage = useCallback(
     async (url: string) => {
@@ -576,27 +657,12 @@ export function useCanvasState() {
       if (!canvas || !pageId) return;
       if (!(selectedObject instanceof fabric.FabricImage) || isBgImage(selectedObject)) return;
       try {
-        const img = await fabric.FabricImage.fromURL(url, { crossOrigin: "anonymous" });
-        await normalizeFabricImageSize(img);
-        const style = captureObjectStyle(selectedObject);
-        const radius = readImageCornerRadius(selectedObject);
-        applyObjectStyle(img, style);
-        const id = readObjectId(selectedObject);
-        swapCanvasObject(canvas, selectedObject, img);
-        if (id) (img as { _id?: string })._id = id;
-        applyImageCornerRadius(img, radius);
-        ensureStyleRenderer(img);
-        syncImageNodeInIr(img);
-        canvas.setActiveObject(img);
-        canvas.requestRenderAll();
-        saveHistory(pageId);
-        setSelectedObject(img);
-        setSelectionEpoch((n) => n + 1);
+        await commitReplacedImage(canvas, pageId, selectedObject, url);
       } catch (e) {
         console.error("Failed to replace image:", e);
       }
     },
-    [getActiveCanvas, selectedObject, saveHistory]
+    [getActiveCanvas, selectedObject, commitReplacedImage]
   );
 
   const addImageFromClipboard = useCallback(
@@ -723,11 +789,17 @@ export function useCanvasState() {
         applyObjectPatch(obj, props);
         syncObjectStyleInIr(obj);
       }
+      const hidden = "visible" in props && props.visible === false;
+      if (hidden && targets.every((obj) => obj.visible === false)) {
+        canvas.discardActiveObject();
+        setSelectedObject(null);
+      } else {
+        setSelectedObject(targets[0]);
+      }
       canvas.requestRenderAll();
       saveHistory(pageId);
-      setSelectedObject(targets[0]);
       setSelectionEpoch((n) => n + 1);
-      if ("_elementName" in props || "_id" in props) setLayersEpoch((n) => n + 1);
+      if ("_elementName" in props || "_id" in props || "visible" in props) setLayersEpoch((n) => n + 1);
     },
     [getActiveCanvas, selectedObject, saveHistory]
   );
@@ -1286,6 +1358,65 @@ export function useCanvasState() {
     [getActiveCanvas, selectedObject, saveHistory]
   );
 
+  const matchSelectedSize = useCallback(
+    (axis: MatchSizeAxis) => {
+      const canvas = getActiveCanvas();
+      const pageId = activeCanvasIdRef.current;
+      if (!canvas || !pageId) return;
+      const changed = matchSelectionSizeToFirst(canvas, selectedObject, axis);
+      if (!changed) return;
+      for (const obj of selectedCanvasObjects(canvas, selectedObject)) {
+        if (obj instanceof fabric.FabricImage && !isBgImage(obj)) syncImageNodeInIr(obj);
+      }
+      const active = canvas.getActiveObject();
+      if (active) noteGlassBackdropSourceChange(active);
+      saveHistory(pageId);
+      setSelectionEpoch((n) => n + 1);
+    },
+    [getActiveCanvas, selectedObject, saveHistory]
+  );
+
+  const resetSelectedImage = useCallback(() => {
+    const canvas = getActiveCanvas();
+    const pageId = activeCanvasIdRef.current;
+    if (!canvas || !pageId) return;
+    const targets = selectedCanvasObjects(canvas, selectedObject).filter(isCroppableImage);
+    if (targets.length === 0) return;
+    for (const img of targets) {
+      resetImageFrame(img, canvasWidth, canvasHeight);
+      syncImageNodeInIr(img);
+    }
+    const active = canvas.getActiveObject();
+    if (active) {
+      active.setCoords();
+      noteGlassBackdropSourceChange(active);
+    }
+    canvas.requestRenderAll();
+    saveHistory(pageId);
+    setSelectionEpoch((n) => n + 1);
+  }, [getActiveCanvas, selectedObject, canvasWidth, canvasHeight, saveHistory]);
+
+  const maximizeSelected = useCallback(() => {
+    const canvas = getActiveCanvas();
+    const pageId = activeCanvasIdRef.current;
+    if (!canvas || !pageId) return;
+    const ok = maximizeSelection(canvas, selectedObject, canvasWidth, canvasHeight);
+    if (!ok) return;
+    const targets = selectedCanvasObjects(canvas, selectedObject);
+    for (const obj of targets) {
+      if (obj instanceof fabric.FabricImage && !isBgImage(obj)) syncImageNodeInIr(obj);
+    }
+    const active = canvas.getActiveObject();
+    if (active) {
+      active.setCoords();
+      noteGlassBackdropSourceChange(active);
+    }
+    canvas.requestRenderAll();
+    saveHistory(pageId);
+    setSelectedObject(canvas.getActiveObject() ?? selectedObject);
+    setSelectionEpoch((n) => n + 1);
+  }, [getActiveCanvas, selectedObject, canvasWidth, canvasHeight, saveHistory]);
+
   // ── Keyboard shortcuts ──────────────────────────────────────────────
 
   useEffect(() => {
@@ -1305,6 +1436,11 @@ export function useCanvasState() {
         e.preventDefault();
         if (e.shiftKey) ungroupSelected();
         else groupSelected();
+      } else if (meta && e.key.toLowerCase() === "x" && !isTextEditing()) {
+        if (copySelectedObjects()) {
+          e.preventDefault();
+          deleteSelected();
+        }
       } else if (meta && e.key.toLowerCase() === "c" && !e.shiftKey && !isTextEditing()) {
         if (copySelectedObjects()) e.preventDefault();
       } else if (meta && e.key.toLowerCase() === "d" && !isTextEditing()) {
@@ -1401,9 +1537,36 @@ export function useCanvasState() {
         id: (obj as { _layerId?: string })._layerId || String(contentObjects(canvas).indexOf(obj)),
         name: layerName(obj),
         kind: obj.type || "object",
+        visible: obj.visible !== false,
       }))
       .reverse();
   }, [getActiveCanvas, layersEpoch, activeCanvasId]);
+
+  const toggleLayerVisible = useCallback(
+    (id: string) => {
+      const canvas = getActiveCanvas();
+      const pageId = activeCanvasIdRef.current;
+      if (!canvas || !pageId) return;
+      const obj = contentObjects(canvas).find((o) => (o as { _layerId?: string })._layerId === id);
+      if (!obj) return;
+      applyObjectPatch(obj, { visible: obj.visible === false });
+      const active = canvas.getActiveObject();
+      const selected = canvas.getActiveObjects();
+      const allHidden =
+        (active instanceof fabric.ActiveSelection
+          ? selected.every((item) => item.visible === false)
+          : active?.visible === false) ?? false;
+      if (allHidden) {
+        canvas.discardActiveObject();
+        setSelectedObject(null);
+      }
+      canvas.requestRenderAll();
+      saveHistory(pageId);
+      setLayersEpoch((n) => n + 1);
+      setSelectionEpoch((n) => n + 1);
+    },
+    [getActiveCanvas, saveHistory]
+  );
 
   const selectLayer = useCallback(
     (id: string) => {
@@ -1477,11 +1640,14 @@ export function useCanvasState() {
     replaceSelectedIcon,
     addImage,
     addDroppedImages,
+    readImageDropTarget,
     addImageFromClipboard,
     replaceSelectedImage,
     setBackground,
     lockSelectedAsBackground,
     updateSelectedObject,
+    copySelectedObjects,
+    pasteCopiedCanvasObjects,
     duplicateSelected,
     copySelectedStyle,
     pasteSelectedStyle,
@@ -1511,9 +1677,13 @@ export function useCanvasState() {
     layersEpoch,
     getLayers,
     selectLayer,
+    toggleLayerVisible,
     reorderLayers,
     bringSelectionToFront,
     sendSelectionToBack,
     alignSelected,
+    matchSelectedSize,
+    maximizeSelected,
+    resetSelectedImage,
   };
 }

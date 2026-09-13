@@ -247,6 +247,7 @@ const STYLE_PATCH_KEYS = new Set([
   "_iconUrl",
   "src",
   "opacity",
+  "visible",
   "text",
 ]);
 

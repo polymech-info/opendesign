@@ -1,7 +1,8 @@
 import * as fabric from "fabric";
 import { isBgImage } from "./background-image";
 import { applyImageCornerRadius, readImageCornerRadius } from "./image-radius";
-import { abortCanvasTransform } from "./element-group";
+import { abortCanvasTransform, isElementGroup } from "./element-group";
+import { type ObjectFrame } from "./object-frame";
 import { isIconObject } from "./tabler-icons";
 
 const CORNERS = new Set(["tl", "tr", "bl", "br"]);
@@ -25,6 +26,91 @@ export type ImageClipStart = {
 
 export function isCroppableImage(obj: fabric.FabricObject | null | undefined): obj is fabric.FabricImage {
   return obj instanceof fabric.FabricImage && !isBgImage(obj) && !isIconObject(obj);
+}
+
+export type ImageCropTransfer = {
+  zoomX: number;
+  zoomY: number;
+  originX: number;
+  originY: number;
+};
+
+export function captureImageCropTransfer(img: fabric.FabricImage): ImageCropTransfer {
+  const src = imageSourceSize(img);
+  const width = Math.max(1, img.width || 1);
+  const height = Math.max(1, img.height || 1);
+  return {
+    zoomX: src.w / width,
+    zoomY: src.h / height,
+    originX: (img.cropX || 0) / src.w,
+    originY: (img.cropY || 0) / src.h,
+  };
+}
+
+/** Keep clip + zoom; size the new bitmap to its own aspect inside the previous frame. */
+export function applyImageCropTransfer(img: fabric.FabricImage, transfer: ImageCropTransfer, frame: ObjectFrame) {
+  const src = imageSourceSize(img);
+  const width = clamp(src.w / Math.max(1, transfer.zoomX), Math.min(MIN_CROP, src.w), src.w);
+  const height = clamp(src.h / Math.max(1, transfer.zoomY), Math.min(MIN_CROP, src.h), src.h);
+  const cropX = clamp(transfer.originX * src.w, 0, Math.max(0, src.w - width));
+  const cropY = clamp(transfer.originY * src.h, 0, Math.max(0, src.h - height));
+  const scale = Math.min(frame.width / width, frame.height / height);
+  const radius = readImageCornerRadius(img);
+  img.set({
+    cropX,
+    cropY,
+    width,
+    height,
+    scaleX: scale,
+    scaleY: scale,
+    angle: frame.angle,
+    flipX: frame.flipX,
+    flipY: frame.flipY,
+    skewX: frame.skewX,
+    skewY: frame.skewY,
+    originX: "left",
+    originY: "top",
+    uniformScaling: true,
+    lockScalingFlip: true,
+  });
+  img.setPositionByOrigin(frame.center, "center", "center");
+  applyImageCornerRadius(img, radius);
+  img.setCoords();
+  img.dirty = true;
+}
+
+function hitChildAtPoint(group: fabric.Group, scene: fabric.Point): fabric.FabricObject | null {
+  const local = fabric.util.sendPointToPlane(scene, undefined, group.calcTransformMatrix());
+  const objects = group.getObjects();
+  for (let i = objects.length - 1; i >= 0; i--) {
+    const child = objects[i];
+    if (!child.visible || child.evented === false) continue;
+    if (!child.containsPoint(local) && !child.containsPoint(scene)) continue;
+    if (isElementGroup(child)) return hitChildAtPoint(child, scene) ?? child;
+    return child;
+  }
+  return null;
+}
+
+export function findCroppableImageAt(
+  canvas: fabric.Canvas,
+  x: number,
+  y: number
+): fabric.FabricImage | null {
+  const point = new fabric.Point(x, y);
+  const objects = canvas.getObjects();
+  for (let i = objects.length - 1; i >= 0; i--) {
+    const obj = objects[i];
+    if (!obj.visible || obj.evented === false || isBgImage(obj)) continue;
+    if (obj instanceof fabric.ActiveSelection) continue;
+    if (isElementGroup(obj)) {
+      const child = hitChildAtPoint(obj, point);
+      if (isCroppableImage(child)) return child;
+      continue;
+    }
+    if (isCroppableImage(obj) && obj.containsPoint(point)) return obj;
+  }
+  return null;
 }
 
 type SizedImage = fabric.FabricImage & { _sourceW?: number; _sourceH?: number };
@@ -268,6 +354,51 @@ export function setImageCropZoom(img: fabric.FabricImage, zoom: number) {
 export function resetImageCrop(img: fabric.FabricImage) {
   const fit = maxCropWindow(img);
   applyCropWindow(img, (fit.src.w - fit.w) / 2, (fit.src.h - fit.h) / 2, fit.w, fit.h);
+}
+
+const DEFAULT_IMAGE_FIT = 0.6;
+
+/** Drop crop, restore full source, and reset scale/position to the default fit. */
+export function resetImageFrame(
+  img: fabric.FabricImage,
+  canvasWidth: number,
+  canvasHeight: number,
+  fit = DEFAULT_IMAGE_FIT
+) {
+  restoreFullImageSource(img);
+  const nw = Math.max(1, img.width || 1);
+  const nh = Math.max(1, img.height || 1);
+  const scale = Math.min((canvasWidth * fit) / nw, (canvasHeight * fit) / nh, 1);
+  img.set({
+    originX: "left",
+    originY: "top",
+    scaleX: scale,
+    scaleY: scale,
+    angle: 0,
+    skewX: 0,
+    skewY: 0,
+    flipX: false,
+    flipY: false,
+    uniformScaling: true,
+    lockScalingFlip: true,
+    left: canvasWidth / 2 - (nw * scale) / 2,
+    top: canvasHeight / 2 - (nh * scale) / 2,
+  });
+  img.setCoords();
+  img.dirty = true;
+}
+
+/** Drop crop and restore the full source bitmap. Display scale is left to the caller. */
+export function restoreFullImageSource(img: fabric.FabricImage) {
+  const src = imageSourceSize(img);
+  const radius = readImageCornerRadius(img);
+  img.set({
+    cropX: 0,
+    cropY: 0,
+    width: src.w,
+    height: src.h,
+  });
+  applyImageCornerRadius(img, radius);
 }
 
 type CropGesture =

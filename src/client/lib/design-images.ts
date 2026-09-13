@@ -1,7 +1,8 @@
 import * as fabric from "fabric";
 import type { DesignDocument } from "../../design/types";
 import { applyImageCornerRadius, readImageCornerRadius } from "./image-radius";
-import { swapCanvasObject } from "./object-frame";
+import { captureObjectFrame, swapCanvasObject } from "./object-frame";
+import { applyImageCropTransfer, captureImageCropTransfer, isCroppableImage } from "./image-crop";
 import { applyObjectStyle, captureObjectStyle } from "./object-style";
 import { ensureStyleRenderer } from "./style-presets";
 import { readObjectId } from "./object-identity";
@@ -167,7 +168,10 @@ export async function patchFabricImageSrc(
   applyObjectStyle(next, style);
   applyImageCornerRadius(next, radius);
   ensureStyleRenderer(next);
+  const frame = captureObjectFrame(obj);
+  const transfer = isCroppableImage(obj) ? captureImageCropTransfer(obj) : null;
   swapCanvasObject(canvas, obj, next);
+  if (transfer) applyImageCropTransfer(next, transfer, frame);
   canvas.setActiveObject(next);
   return next;
 }

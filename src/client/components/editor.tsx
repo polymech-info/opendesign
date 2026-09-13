@@ -4,26 +4,34 @@ import { Toolbar } from "./toolbar";
 import { LeftSidebar } from "./left-sidebar";
 import { RightSidebar } from "./right-sidebar";
 import { PagesBar } from "./pages-bar";
+import { CanvasContextMenu } from "./canvas-context-menu";
 import { acceptFileDrag } from "../lib/file-drop";
 
 export function Editor() {
   const [leftPanelOpen, setLeftPanelOpen] = useState(true);
   const [rightPanelOpen, setRightPanelOpen] = useState(true);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     const allow = (e: DragEvent) => {
       acceptFileDrag(e);
     };
+    const onMenu = (e: Event) => {
+      const detail = (e as CustomEvent<{ x: number; y: number }>).detail;
+      if (detail) setContextMenu(detail);
+    };
     window.addEventListener("dragover", allow);
     window.addEventListener("drop", allow);
+    window.addEventListener("opend-context-menu", onMenu);
     return () => {
       window.removeEventListener("dragover", allow);
       window.removeEventListener("drop", allow);
+      window.removeEventListener("opend-context-menu", onMenu);
     };
   }, []);
 
   return (
-    <div class="flex flex-col h-full w-full">
+    <div id="opend-app" class="flex flex-col h-full w-full">
       <Toolbar
         leftPanelOpen={leftPanelOpen}
         rightPanelOpen={rightPanelOpen}
@@ -42,6 +50,7 @@ export function Editor() {
           <RightSidebar />
         </div>
       </div>
+      {contextMenu && <CanvasContextMenu pos={contextMenu} onClose={() => setContextMenu(null)} />}
     </div>
   );
 }

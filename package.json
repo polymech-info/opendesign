@@ -16,6 +16,7 @@
     "dev:client": "rspack dev --mode development",
     "build": "node scripts/build.mjs",
     "start": "node dist/cli.js",
+    "commit":"cd ../.. && npm run publish:gh:opendesign --  -m \"basic shit\"",
     "mcp": "tsx src/cli.ts mcp",
     "test:mcp": "tsx tests/mcp/test-mcp.ts",
     "test:cli-dsl": "tsx tests/cli/test-cli-dsl.ts",

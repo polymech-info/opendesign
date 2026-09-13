@@ -76,3 +76,52 @@ export function alignSelectionToFirst(
   canvas.requestRenderAll();
   return true;
 }
+
+export type MatchSizeAxis = "width" | "height";
+
+function scaledSize(obj: fabric.FabricObject, axis: MatchSizeAxis) {
+  return Math.max(1, axis === "width" ? obj.getScaledWidth() : obj.getScaledHeight());
+}
+
+/** Scale later objects so width or height matches the first. Aspect stays put. */
+export function matchObjectsSizeToFirst(objects: fabric.FabricObject[], axis: MatchSizeAxis): boolean {
+  if (objects.length < 2) return false;
+  const [reference, ...others] = objects;
+  const target = scaledSize(reference, axis);
+  let changed = false;
+  for (const obj of others) {
+    const current = scaledSize(obj, axis);
+    const factor = target / current;
+    if (!Number.isFinite(factor) || Math.abs(factor - 1) < 1e-4) continue;
+    const center = obj.getCenterPoint();
+    obj.set({
+      scaleX: (obj.scaleX || 1) * factor,
+      scaleY: (obj.scaleY || 1) * factor,
+    });
+    obj.setPositionByOrigin(center, "center", "center");
+    obj.setCoords();
+    const parent = obj.group;
+    if (parent) {
+      parent.dirty = true;
+      parent.setCoords();
+    }
+    changed = true;
+  }
+  return changed;
+}
+
+export function matchSelectionSizeToFirst(
+  canvas: fabric.Canvas,
+  selectedObject: fabric.FabricObject | null | undefined,
+  axis: MatchSizeAxis
+): boolean {
+  const changed = matchObjectsSizeToFirst(alignableSelection(canvas, selectedObject), axis);
+  if (!changed) return false;
+  const active = canvas.getActiveObject();
+  if (active) {
+    active.setCoords();
+    active.dirty = true;
+  }
+  canvas.requestRenderAll();
+  return true;
+}

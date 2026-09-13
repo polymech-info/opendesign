@@ -30,9 +30,9 @@ export function PageCanvas({ page, isActive, width, height, onActivate }: PageCa
       preserveObjectStacking: true,
       selection: true,
       controlsAboveOverlay: true,
-      fireRightClick: false,
+      fireRightClick: true,
       fireMiddleClick: false,
-      stopContextMenu: false,
+      stopContextMenu: true,
     });
 
     // Retina rendering
@@ -197,6 +197,7 @@ export function PageCanvas({ page, isActive, width, height, onActivate }: PageCa
       class={`shadow-lg rounded-lg overflow-hidden ${isActive ? "ring-2 ring-[#6366f1]" : ""}`}
       style={{ width, height }}
       data-page-canvas={page.id}
+      onContextMenu={(e) => e.preventDefault()}
     >
       <canvas ref={canvasElRef} />
     </div>

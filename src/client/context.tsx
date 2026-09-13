@@ -47,11 +47,18 @@ export interface EditorContextValue {
     files: File[],
     at?: { pageId?: string; left?: number; top?: number }
   ) => Promise<void>;
+  readImageDropTarget: (
+    pageId: string,
+    left: number,
+    top: number
+  ) => { pageId: string; left: number; top: number; width: number; height: number } | null;
   addImageFromClipboard: (event?: ClipboardEvent, replace?: boolean) => Promise<boolean>;
   replaceSelectedImage: (url: string) => Promise<void>;
   setBackground: (type: "color" | "gradient" | "image", value: string) => void;
   lockSelectedAsBackground: () => void;
   updateSelectedObject: (props: Record<string, unknown>) => void;
+  copySelectedObjects: () => boolean;
+  pasteCopiedCanvasObjects: (raw?: string | null) => Promise<boolean>;
   duplicateSelected: () => Promise<void>;
   copySelectedStyle: () => void;
   pasteSelectedStyle: () => void;
@@ -84,10 +91,14 @@ export interface EditorContextValue {
   layersEpoch: number;
   getLayers: () => LayerItem[];
   selectLayer: (id: string) => void;
+  toggleLayerVisible: (id: string) => void;
   reorderLayers: (fromDisplayIndex: number, toDisplayIndex: number) => void;
   bringSelectionToFront: () => void;
   sendSelectionToBack: () => void;
   alignSelected: (edge: "left" | "right" | "top" | "bottom") => void;
+  matchSelectedSize: (axis: "width" | "height") => void;
+  maximizeSelected: () => void;
+  resetSelectedImage: () => void;
 
   // Router
   navigate: (to: string) => void;

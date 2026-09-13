@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from "preact/hooks";
-import { Trash2, GripVertical } from "lucide-preact";
+import { Trash2, GripVertical, Eye, EyeOff } from "lucide-preact";
 import { useEditor } from "../context";
 
 export function LayersPanel() {
-  const { getLayers, selectLayer, reorderLayers, selectedObject, layersEpoch, deleteSelected } =
+  const { getLayers, selectLayer, toggleLayerVisible, reorderLayers, selectedObject, layersEpoch, deleteSelected } =
     useEditor();
   const layers = getLayers();
   const selectedId = (selectedObject as { _layerId?: string } | null)?._layerId;
@@ -41,13 +41,23 @@ export function LayersPanel() {
             selectedId === layer.id
               ? "border-accent bg-accent/10"
               : "border-zinc-200 bg-white hover:border-zinc-300"
-          }`}
+          } ${layer.visible === false ? "opacity-50" : ""}`}
         >
           <GripVertical size={12} class="text-zinc-300 shrink-0" />
           <div class="min-w-0 flex-1" title={layer.name}>
             <p class="text-[11px] text-zinc-700 truncate m-0">{layer.name}</p>
             <p class="text-[9px] text-zinc-400 m-0 capitalize">{layer.kind}</p>
           </div>
+          <button
+            class="p-0.5 rounded bg-transparent border-none text-zinc-300 hover:text-zinc-700 cursor-pointer shrink-0"
+            title={layer.visible === false ? "Show" : "Hide"}
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleLayerVisible(layer.id);
+            }}
+          >
+            {layer.visible === false ? <EyeOff size={11} /> : <Eye size={11} />}
+          </button>
           <button
             class="p-0.5 rounded bg-transparent border-none text-zinc-300 hover:text-red-400 cursor-pointer shrink-0"
             title="Delete"

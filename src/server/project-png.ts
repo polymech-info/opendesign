@@ -36,6 +36,20 @@ export function writeProjectDesignPng(roots: Roots, title: string, bytes: Buffer
   };
 }
 
+/** App chrome screenshot → `<cwd>/docs/assets/screenshot_n.png`. */
+export function writeDocsAssetScreenshot(roots: Roots, bytes: Buffer) {
+  const dir = path.join(roots.cwd, "docs", "assets");
+  fs.mkdirSync(dir, { recursive: true });
+  const filename = nextProjectPngName(dir, "screenshot");
+  const file = path.join(dir, filename);
+  fs.writeFileSync(file, bytes);
+  return {
+    path: file,
+    filename,
+    relative: `docs/assets/${filename}`,
+  };
+}
+
 const PNG_SIG = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 
 export function pngBytesFromDataUrl(image: string): Buffer | null {

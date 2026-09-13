@@ -9,7 +9,15 @@ export function CanvasArea() {
     pages, activePageId, setActiveCanvas, canvasWidth, canvasHeight,
     zoom, setZoomRaw, setFitScale, addPage, duplicatePage, deletePage, renamePage,
     addDroppedImages,
+    readImageDropTarget,
   } = useEditor();
+  const [dropHint, setDropHint] = useState<{
+    pageId: string;
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+  } | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const pageRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -108,9 +116,37 @@ export function CanvasArea() {
       return active ? { pageId: active } : undefined;
     };
     const over = (e: DragEvent) => {
-      acceptFileDrag(e);
+      if (!acceptFileDrag(e)) {
+        setDropHint(null);
+        return;
+      }
+      const at = hit(e.clientX, e.clientY);
+      if (!at?.pageId || at.left == null || at.top == null) {
+        setDropHint(null);
+        return;
+      }
+      const next = readImageDropTarget(at.pageId, at.left, at.top);
+      setDropHint((prev) => {
+        if (
+          prev &&
+          next &&
+          prev.pageId === next.pageId &&
+          Math.abs(prev.left - next.left) < 0.5 &&
+          Math.abs(prev.top - next.top) < 0.5 &&
+          Math.abs(prev.width - next.width) < 0.5 &&
+          Math.abs(prev.height - next.height) < 0.5
+        ) {
+          return prev;
+        }
+        return next;
+      });
+    };
+    const leave = (e: DragEvent) => {
+      if (e.relatedTarget && wrapper.contains(e.relatedTarget as Node)) return;
+      setDropHint(null);
     };
     const drop = (e: DragEvent) => {
+      setDropHint(null);
       if (!acceptFileDrag(e)) return;
       const files = imageFilesFromDataTransfer(e.dataTransfer);
       if (!files.length) return;
@@ -118,13 +154,15 @@ export function CanvasArea() {
     };
     wrapper.addEventListener("dragenter", over);
     wrapper.addEventListener("dragover", over);
+    wrapper.addEventListener("dragleave", leave);
     wrapper.addEventListener("drop", drop);
     return () => {
       wrapper.removeEventListener("dragenter", over);
       wrapper.removeEventListener("dragover", over);
+      wrapper.removeEventListener("dragleave", leave);
       wrapper.removeEventListener("drop", drop);
     };
-  }, [addDroppedImages]);
+  }, [addDroppedImages, readImageDropTarget]);
 
   // Auto-activate first page if none active
   useEffect(() => {
@@ -259,13 +297,31 @@ export function CanvasArea() {
             </div>
 
             {/* Canvas */}
-            <PageCanvas
-              page={page}
-              isActive={page.id === activePageId}
-              width={canvasWidth}
-              height={canvasHeight}
-              onActivate={() => setActiveCanvas(page.id)}
-            />
+            <div class="relative" style={{ width: canvasWidth, height: canvasHeight }}>
+              <PageCanvas
+                page={page}
+                isActive={page.id === activePageId}
+                width={canvasWidth}
+                height={canvasHeight}
+                onActivate={() => setActiveCanvas(page.id)}
+              />
+              {dropHint?.pageId === page.id && (
+                <div
+                  class="absolute pointer-events-none z-10 rounded-md"
+                  style={{
+                    left: dropHint.left,
+                    top: dropHint.top,
+                    width: dropHint.width,
+                    height: dropHint.height,
+                    boxShadow: "inset 0 0 0 2px #6366f1, 0 0 0 2px #6366f1",
+                  }}
+                >
+                  <span class="absolute left-1/2 top-2 -translate-x-1/2 px-2 py-0.5 rounded-full bg-[#6366f1] text-white text-[10px] font-semibold tracking-wide shadow-sm whitespace-nowrap">
+                    Replace
+                  </span>
+                </div>
+              )}
+            </div>
           </div>
         ))}
 

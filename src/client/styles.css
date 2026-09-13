@@ -44,19 +44,51 @@ body {
 }
 
 /* ── Custom range slider ───────────────────────────────────────────── */
-input[type="range"] {
+input[type="range"]:not(.prop-slider-range) {
   @apply appearance-none bg-transparent cursor-pointer;
   height: 4px;
 }
 
-input[type="range"]::-webkit-slider-track {
+input[type="range"]:not(.prop-slider-range)::-webkit-slider-track {
   @apply bg-zinc-200 rounded-full;
   height: 4px;
 }
 
-input[type="range"]::-webkit-slider-thumb {
+input[type="range"]:not(.prop-slider-range)::-webkit-slider-thumb {
   @apply appearance-none w-3.5 h-3.5 rounded-full bg-accent border-2 border-white;
   margin-top: -5px;
+}
+
+input.prop-slider-range {
+  @apply absolute inset-0 w-full m-0 p-0 appearance-none bg-transparent cursor-pointer;
+  height: 16px;
+}
+
+input.prop-slider-range::-webkit-slider-runnable-track {
+  background: transparent;
+  height: 16px;
+  border: none;
+}
+
+input.prop-slider-range::-webkit-slider-thumb {
+  @apply appearance-none w-2.5 h-2.5 rounded-full bg-white border-[1.5px] border-accent;
+  margin-top: 3px;
+  box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.18);
+}
+
+input.prop-slider-range::-moz-range-track {
+  background: transparent;
+  height: 3px;
+  border: none;
+}
+
+input.prop-slider-range::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid #6366f1;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.18);
 }
 
 /* ── Color picker ──────────────────────────────────────────────────── */

@@ -38,6 +38,20 @@ export type SnapGuide = {
 type SnapSession = {
   timer: ReturnType<typeof setTimeout> | null;
   target: fabric.FabricObject | null;
+  lastX: number | null;
+  lastY: number | null;
+  dirX: number;
+  dirY: number;
+};
+
+export type AxisSnap = {
+  delta: number;
+  at: number;
+  kind: FeatureKind;
+  moverStart: number;
+  moverEnd: number;
+  targetStart: number;
+  targetEnd: number;
 };
 
 const guidesByCanvas = new WeakMap<fabric.Canvas, SnapGuide[]>();
@@ -47,7 +61,7 @@ const installed = new WeakSet<fabric.Canvas>();
 function session(canvas: fabric.Canvas): SnapSession {
   let s = sessionByCanvas.get(canvas);
   if (!s) {
-    s = { timer: null, target: null };
+    s = { timer: null, target: null, lastX: null, lastY: null, dirX: 0, dirY: 0 };
     sessionByCanvas.set(canvas, s);
   }
   return s;
@@ -197,41 +211,128 @@ function bakeSceneDeltaIntoDrag(canvas: fabric.Canvas, obj: fabric.FabricObject,
   t.offsetY -= dy;
 }
 
+function directionScore(kind: FeatureKind, dir: number) {
+  if (dir === 0 || kind === "mid") return 0;
+  if ((kind === "max" && dir > 0) || (kind === "min" && dir < 0)) return -1;
+  return 1;
+}
+
+/** Prefer the edge you were last dragging toward, then the closest hit. */
+export function chooseDirectedSnap(candidates: AxisSnap[], dir: number): AxisSnap | null {
+  let best: (AxisSnap & { dist: number; dirScore: number }) | null = null;
+  for (const c of candidates) {
+    const dist = Math.abs(c.delta);
+    const dirScore = directionScore(c.kind, dir);
+    if (
+      !best ||
+      dirScore < best.dirScore ||
+      (dirScore === best.dirScore && dist < best.dist)
+    ) {
+      best = { ...c, dist, dirScore };
+    }
+  }
+  return best;
+}
+
 /** Edge↔edge and center↔center only, like draw.io's mxGuide. */
 function snapAxis(
   movers: AxisFeature[],
   targets: AxisFeature[],
-  tolerance: number
-): { delta: number; at: number; moverStart: number; moverEnd: number; targetStart: number; targetEnd: number } | null {
-  let best: {
-    delta: number;
-    at: number;
-    moverStart: number;
-    moverEnd: number;
-    targetStart: number;
-    targetEnd: number;
-    dist: number;
-  } | null = null;
+  tolerance: number,
+  dir = 0
+): AxisSnap | null {
+  const hits: AxisSnap[] = [];
   for (const m of movers) {
     for (const t of targets) {
       if (t.kind !== m.kind) continue;
       const delta = t.value - m.value;
-      const dist = Math.abs(delta);
-      if (dist > tolerance) continue;
-      if (!best || dist < best.dist) {
-        best = {
-          delta,
-          at: t.value,
-          moverStart: m.start,
-          moverEnd: m.end,
-          targetStart: t.start,
-          targetEnd: t.end,
-          dist,
-        };
-      }
+      if (Math.abs(delta) > tolerance) continue;
+      hits.push({
+        delta,
+        at: t.value,
+        kind: m.kind,
+        moverStart: m.start,
+        moverEnd: m.end,
+        targetStart: t.start,
+        targetEnd: t.end,
+      });
     }
   }
-  return best;
+  return chooseDirectedSnap(hits, dir);
+}
+
+/** Outer box to canvas min/mid/max. Multi-select uses the union, not each leaf. */
+export function canvasBoundarySnaps(outer: Bounds, page: Bounds, tolerance: number): AxisSnap[] {
+  const x: AxisSnap[] = [
+    {
+      delta: page.left - outer.left,
+      at: page.left,
+      kind: "min",
+      moverStart: outer.top,
+      moverEnd: outer.bottom,
+      targetStart: page.top,
+      targetEnd: page.bottom,
+    },
+    {
+      delta: page.cx - outer.cx,
+      at: page.cx,
+      kind: "mid",
+      moverStart: outer.top,
+      moverEnd: outer.bottom,
+      targetStart: page.top,
+      targetEnd: page.bottom,
+    },
+    {
+      delta: page.right - outer.right,
+      at: page.right,
+      kind: "max",
+      moverStart: outer.top,
+      moverEnd: outer.bottom,
+      targetStart: page.top,
+      targetEnd: page.bottom,
+    },
+  ];
+  return x.filter((c) => Math.abs(c.delta) <= tolerance);
+}
+
+export function canvasBoundarySnapsY(outer: Bounds, page: Bounds, tolerance: number): AxisSnap[] {
+  return [
+    {
+      delta: page.top - outer.top,
+      at: page.top,
+      kind: "min" as const,
+      moverStart: outer.left,
+      moverEnd: outer.right,
+      targetStart: page.left,
+      targetEnd: page.right,
+    },
+    {
+      delta: page.cy - outer.cy,
+      at: page.cy,
+      kind: "mid" as const,
+      moverStart: outer.left,
+      moverEnd: outer.right,
+      targetStart: page.left,
+      targetEnd: page.right,
+    },
+    {
+      delta: page.bottom - outer.bottom,
+      at: page.bottom,
+      kind: "max" as const,
+      moverStart: outer.left,
+      moverEnd: outer.right,
+      targetStart: page.left,
+      targetEnd: page.right,
+    },
+  ].filter((c) => Math.abs(c.delta) <= tolerance);
+}
+
+function pickAxisSnap(objectSnap: AxisSnap | null, canvasSnap: AxisSnap | null, dir: number) {
+  if (canvasSnap && directionScore(canvasSnap.kind, dir) < 0) return canvasSnap;
+  if (objectSnap && canvasSnap) {
+    return Math.abs(canvasSnap.delta) <= Math.abs(objectSnap.delta) ? canvasSnap : objectSnap;
+  }
+  return canvasSnap || objectSnap;
 }
 
 function addObjectTree(obj: fabric.FabricObject, set: Set<fabric.FabricObject>) {
@@ -262,7 +363,7 @@ function collectTargets(
   skip: Set<fabric.FabricObject>,
   ancestors: Set<fabric.FabricObject>
 ): Bounds[] {
-  const boxes: Bounds[] = [pageBounds(canvas)];
+  const boxes: Bounds[] = [];
   const walk = (obj: fabric.FabricObject) => {
     if (!obj.visible || isBgImage(obj)) return;
     if (skip.has(obj)) return;
@@ -290,6 +391,40 @@ function snapToGrid(value: number) {
   return Math.round(value / GRID_SIZE) * GRID_SIZE;
 }
 
+function scenePointer(canvas: fabric.Canvas, evt?: Event | null) {
+  if (!evt) return null;
+  try {
+    const p = canvas.getScenePoint(evt as MouseEvent);
+    return { x: p.x, y: p.y };
+  } catch {
+    return null;
+  }
+}
+
+function noteDragDirection(canvas: fabric.Canvas, evt?: Event | null) {
+  const s = session(canvas);
+  const p = scenePointer(canvas, evt);
+  if (p && s.lastX != null && s.lastY != null) {
+    const dx = p.x - s.lastX;
+    const dy = p.y - s.lastY;
+    if (Math.abs(dx) >= 0.4) s.dirX = Math.sign(dx);
+    if (Math.abs(dy) >= 0.4) s.dirY = Math.sign(dy);
+  }
+  if (p) {
+    s.lastX = p.x;
+    s.lastY = p.y;
+  }
+  return s;
+}
+
+function resetDragDirection(canvas: fabric.Canvas) {
+  const s = session(canvas);
+  s.lastX = null;
+  s.lastY = null;
+  s.dirX = 0;
+  s.dirY = 0;
+}
+
 export function snapMovingObject(
   canvas: fabric.Canvas,
   target: fabric.FabricObject,
@@ -301,17 +436,23 @@ export function snapMovingObject(
     return;
   }
 
+  const drag = noteDragDirection(canvas, evt);
   const moverBoxes = visualBoxes(target);
   const outer = moverBoxes[0];
   const skip = movingSubtree(target);
   const others = collectTargets(canvas, skip, ancestorSet(target));
+  const page = pageBounds(canvas);
   const xMovers = moverBoxes.flatMap(xFeatures);
   const yMovers = moverBoxes.flatMap(yFeatures);
   const xTargets = others.flatMap(xFeatures);
   const yTargets = others.flatMap(yFeatures);
 
-  const snapX = snapAxis(xMovers, xTargets, SNAP_TOLERANCE);
-  const snapY = snapAxis(yMovers, yTargets, SNAP_TOLERANCE);
+  const objectX = snapAxis(xMovers, xTargets, SNAP_TOLERANCE, drag.dirX);
+  const objectY = snapAxis(yMovers, yTargets, SNAP_TOLERANCE, drag.dirY);
+  const canvasX = chooseDirectedSnap(canvasBoundarySnaps(outer, page, SNAP_TOLERANCE), drag.dirX);
+  const canvasY = chooseDirectedSnap(canvasBoundarySnapsY(outer, page, SNAP_TOLERANCE), drag.dirY);
+  const snapX = pickAxisSnap(objectX, canvasX, drag.dirX);
+  const snapY = pickAxisSnap(objectY, canvasY, drag.dirY);
   const useGrid = !!opts.grid;
 
   const dx = snapX ? snapX.delta : useGrid ? snapToGrid(outer.left) - outer.left : 0;
@@ -391,6 +532,7 @@ export function installSnapGuides(canvas: fabric.Canvas) {
     clearGridTimer(canvas);
     const target = session(canvas).target;
     session(canvas).target = null;
+    resetDragDirection(canvas);
     if (!target || isBgImage(target)) return;
     snapMovingObject(canvas, target, e.e, { grid: true });
   });

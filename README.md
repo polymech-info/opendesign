@@ -37,19 +37,25 @@ Original: [clawnify/OpenDesign](https://github.com/clawnify/OpenDesign). This fo
 - Multi-page stills, canvas-size presets, undo/redo, snap guides, and layers
 - Text, extra shapes, Tabler icons, Iconify search, uploads, and reusable elements
 - Glass, gradients, opacity, patterns, shadows, and page color / gradient / image backgrounds
-- Named groups, align to the first selected object, front/back, copy-paste objects and styles
+- Named groups, align / same width / same height (first selected is the source), front/back, maximize to canvas, hide/show, copy-paste objects and styles
+- Snap guides for objects and multi-select, including canvas edges using the last drag direction
+- Right-click context menu with icons and grouped edit / arrange / align / object actions
 - Versions, templates, and merged project + global libraries (union; project wins on the same name)
 
 ### Images
 
 - Paste from the clipboard (`Ctrl+V`)
-- Crop a placed photo without stretching it: **Shift-drag** to pan the crop, **Shift-drag a corner** to zoom inside the frame, **Shift-drag a side handle** to clip. Inspector sliders set zoom and origin; **Reset** restores the full image
+- Drop a file on the canvas to add it, or on a photo to replace it (clip and zoom stay; the new aspect is fitted into the old frame)
+- Crop a placed photo without stretching it: **Shift-drag** to pan the crop, **Shift-drag a corner** to zoom inside the frame, **Shift-drag a side handle** to clip. Inspector sliders set zoom and origin
+- **Reset** (property panel, crop row, or right-click) restores an image's clip, origin, and default size
+- **Maximize** in the property panel fits the selection to the canvas with room for resize handles. Photos keep their crop and inner scale (letterbox, not stretch)
 - Lock an image as the page background
 
 ### Export
 
 - **Copy** on the top toolbar writes the current page as a PNG to the system clipboard
 - **PNG** downloads the same 2× render; Shift-click writes `.OpenDesign/designs/title_n.png`
+- **Shot** on the top toolbar asks the Tanit Inspector Chrome extension for a real tab PNG and writes `docs/assets/screenshot_n.png` under the process cwd
 - **JSON** downloads the multi-page canvas document
 - Headless `pm-opendesign export` uses Chrome/Edge on the same canvas (store screenshots)
 
