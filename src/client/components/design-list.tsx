@@ -1,6 +1,7 @@
 import { useState } from "preact/hooks";
 import { Trash2, Edit3, Copy, Plus } from "lucide-preact";
 import { useEditor } from "../context";
+import { editorHref } from "../lib/editor-path";
 
 export function DesignList() {
   const { designs, activeDesign, createDesign, loadDesign, deleteDesign, duplicateDesign, renameDesign, navigate } =
@@ -21,10 +22,10 @@ export function DesignList() {
   return (
     <div class="flex flex-col gap-2">
       <button
-        class="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border-none cursor-pointer bg-accent text-zinc-900 hover:bg-accent-hover transition-all"
+        class="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border-none cursor-pointer bg-accent text-white hover:bg-accent-hover transition-all"
         onClick={async () => {
           const id = await createDesign();
-          if (id) navigate(`/design/${id}`);
+          if (id) navigate(editorHref(id, "designs"));
         }}
       >
         <Plus size={14} />
@@ -32,7 +33,7 @@ export function DesignList() {
       </button>
 
       {designs.length === 0 && (
-        <p class="text-zinc-400 text-[11px] text-center py-4">No saved designs yet</p>
+        <p class="text-fg-muted text-[11px] text-center py-4">No saved designs yet</p>
       )}
 
       {designs.map((d) => (
@@ -41,16 +42,16 @@ export function DesignList() {
           class={`flex items-center px-2.5 py-2 rounded-lg border transition-all group cursor-pointer ${
             activeDesign?.id === d.id
               ? "border-accent bg-accent/10"
-              : "border-zinc-200 bg-white hover:border-zinc-600"
+              : "border-border-dim bg-surface-card hover:border-border-mid"
           }`}
           onClick={() => {
-            navigate(`/design/${d.id}`);
+            navigate(editorHref(d.id, "designs"));
             loadDesign(d.id);
           }}
         >
           {editingId === d.id ? (
             <input
-              class="flex-1 bg-zinc-100 border border-accent rounded text-zinc-700 text-xs px-1.5 py-0.5 outline-none"
+              class="flex-1 bg-surface-muted border border-accent rounded text-fg-secondary text-xs px-1.5 py-0.5 outline-none"
               value={editName}
               onInput={(e) => setEditName((e.target as HTMLInputElement).value)}
               onBlur={finishRename}
@@ -63,8 +64,8 @@ export function DesignList() {
             />
           ) : (
             <div class="flex-1 min-w-0">
-              <span class="text-xs font-medium text-zinc-600 truncate block">{d.name}</span>
-              <span class="text-[10px] text-zinc-600">
+              <span class="text-xs font-medium text-fg-secondary truncate block">{d.name}</span>
+              <span class="text-[10px] text-fg-secondary">
                 {d.width}x{d.height} &middot;{" "}
                 {new Date(d.updated_at).toLocaleDateString()}
               </span>
@@ -72,7 +73,7 @@ export function DesignList() {
           )}
           <div class="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity ml-1">
             <button
-              class="p-1 rounded text-zinc-400 bg-transparent border-none cursor-pointer hover:text-zinc-800 transition-colors"
+              class="p-1 rounded text-fg-muted bg-transparent border-none cursor-pointer hover:text-fg transition-colors"
               title="Duplicate"
               onClick={(e) => {
                 e.stopPropagation();
@@ -82,7 +83,7 @@ export function DesignList() {
               <Copy size={12} />
             </button>
             <button
-              class="p-1 rounded text-zinc-400 bg-transparent border-none cursor-pointer hover:text-zinc-800 transition-colors"
+              class="p-1 rounded text-fg-muted bg-transparent border-none cursor-pointer hover:text-fg transition-colors"
               onClick={(e) => {
                 e.stopPropagation();
                 startRename(d.id, d.name);
@@ -91,7 +92,7 @@ export function DesignList() {
               <Edit3 size={12} />
             </button>
             <button
-              class="p-1 rounded text-zinc-400 bg-transparent border-none cursor-pointer hover:text-red-400 transition-colors"
+              class="p-1 rounded text-fg-muted bg-transparent border-none cursor-pointer hover:text-red-400 transition-colors"
               onClick={(e) => {
                 e.stopPropagation();
                 deleteDesign(d.id);

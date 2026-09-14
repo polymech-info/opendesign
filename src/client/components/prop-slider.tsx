@@ -80,11 +80,15 @@ export function PropSlider({
   };
 
   return (
-    <div class={`prop-slider ${disabled ? "opacity-40 pointer-events-none" : ""}`}>
+    <div
+      class={`prop-slider ${disabled ? "opacity-40 pointer-events-none" : ""}`}
+      onPointerDown={(e) => e.stopPropagation()}
+      onKeyDown={(e) => e.stopPropagation()}
+    >
       <div class="flex items-center gap-2">
-        <label class="text-[11px] text-zinc-400 shrink-0 min-w-[4.5rem]">{label}</label>
-        <div class="relative flex-1 h-4">
-          <div class="absolute left-[5px] right-[5px] top-1/2 -translate-y-1/2 h-[3px] rounded-full bg-zinc-200 overflow-hidden pointer-events-none">
+        <label class="text-[11px] text-fg-muted shrink-0 min-w-[4.5rem]">{label}</label>
+        <div class="relative flex-1 h-6">
+          <div class="absolute left-[7px] right-[7px] top-1/2 -translate-y-1/2 h-[3px] rounded-full bg-surface-hover overflow-hidden pointer-events-none">
             <div class="h-full rounded-full bg-accent" style={{ width: `${pct}%` }} />
           </div>
           <input
@@ -95,6 +99,8 @@ export function PropSlider({
             disabled={disabled}
             class="prop-slider-range"
             value={clamp(value, min, max)}
+            onPointerDown={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
             onInput={(e) => onChange(parseFloat((e.target as HTMLInputElement).value))}
           />
         </div>
@@ -102,7 +108,7 @@ export function PropSlider({
           type="text"
           inputMode="decimal"
           disabled={disabled}
-          class="w-12 shrink-0 bg-white border border-zinc-200 rounded px-1 py-0.5 text-[11px] leading-4 text-zinc-700 font-mono text-right outline-none focus:border-accent"
+          class="w-12 shrink-0 bg-surface-card border border-border-dim rounded px-1 py-0.5 text-[11px] leading-4 text-fg-secondary font-mono text-right outline-none focus:border-accent"
           value={draft}
           aria-label={label}
           onFocus={() => {
@@ -114,9 +120,10 @@ export function PropSlider({
             commitDraft();
           }}
           onKeyDown={(e) => {
+            e.stopPropagation();
             if (e.key === "Enter") {
               e.preventDefault();
-              (e.target as HTMLInputElement).blur();
+              commitDraft();
             } else if (e.key === "Escape") {
               e.preventDefault();
               setDraft(formatShown(value, step, displayScale));
@@ -127,7 +134,7 @@ export function PropSlider({
             }
           }}
         />
-        {suffix ? <span class="text-[10px] text-zinc-400 -ml-1">{suffix}</span> : null}
+        {suffix ? <span class="text-[10px] text-fg-muted -ml-1">{suffix}</span> : null}
       </div>
     </div>
   );

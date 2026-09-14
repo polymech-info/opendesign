@@ -5,6 +5,7 @@ import {
   AlignEndVertical,
   AlignStartHorizontal,
   AlignStartVertical,
+  BookmarkPlus,
   BringToFront,
   ClipboardCopy,
   ClipboardPaste,
@@ -33,6 +34,7 @@ import { isCroppableImage } from "../lib/image-crop";
 import { isBgImage } from "../lib/background-image";
 import { stackTargetsFromSelection } from "../lib/layer-stack";
 import { alignableSelection } from "../lib/align-objects";
+import { CREATE_STYLE_EVENT } from "../hooks/use-saved-styles";
 
 type MenuPos = { x: number; y: number };
 
@@ -58,7 +60,7 @@ function Section({ label, children }: { label?: string; children: ComponentChild
   return (
     <div class="py-0.5">
       {label && (
-        <div class="px-2 pt-1 pb-0.5 text-[9px] font-semibold uppercase tracking-wider text-zinc-400">{label}</div>
+        <div class="px-2 pt-1 pb-0.5 text-[9px] font-semibold uppercase tracking-wider text-fg-muted">{label}</div>
       )}
       {children}
     </div>
@@ -84,23 +86,23 @@ function Item({
     <button
       class={`w-full flex items-center gap-1.5 px-2 py-0.5 text-[11px] leading-4 border-none cursor-pointer bg-transparent ${
         disabled
-          ? "text-zinc-300 cursor-not-allowed"
+          ? "text-fg-muted cursor-not-allowed"
           : danger
-            ? "text-red-600 hover:bg-red-50"
-            : "text-zinc-700 hover:bg-zinc-100"
+            ? "text-red-600 hover:bg-red-500/10"
+            : "text-fg-secondary hover:bg-surface-hover"
       }`}
       disabled={disabled}
       onClick={onClick}
     >
       <span class="w-3 h-3 shrink-0 flex items-center justify-center">{icon}</span>
       <span class="flex-1 text-left">{label}</span>
-      {shortcut && <span class="text-[9px] text-zinc-400 font-mono">{shortcut}</span>}
+      {shortcut && <span class="text-[9px] text-fg-muted font-mono">{shortcut}</span>}
     </button>
   );
 }
 
 function Divider() {
-  return <div class="h-px bg-zinc-200 my-0.5" />;
+  return <div class="h-px bg-surface-hover my-0.5" />;
 }
 
 export function CanvasContextMenu({ pos, onClose }: { pos: MenuPos; onClose: () => void }) {
@@ -167,16 +169,22 @@ export function CanvasContextMenu({ pos, onClose }: { pos: MenuPos; onClose: () 
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
+      if (e.button === 2) return;
       if (ref.current && !ref.current.contains(e.target as Node)) onClose();
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
+    const onCtx = (e: MouseEvent) => {
+      if (ref.current?.contains(e.target as Node)) e.preventDefault();
+    };
     window.addEventListener("mousedown", onDown, true);
     window.addEventListener("keydown", onKey);
+    window.addEventListener("contextmenu", onCtx, true);
     return () => {
       window.removeEventListener("mousedown", onDown, true);
       window.removeEventListener("keydown", onKey);
+      window.removeEventListener("contextmenu", onCtx, true);
     };
   }, [onClose]);
 
@@ -188,8 +196,9 @@ export function CanvasContextMenu({ pos, onClose }: { pos: MenuPos; onClose: () 
   return (
     <div
       ref={ref}
-      class="fixed z-50 min-w-[168px] max-w-[200px] py-0.5 bg-white border border-zinc-200 rounded-md shadow-xl overflow-y-auto"
+      class="fixed z-50 min-w-[168px] max-w-[200px] py-0.5 bg-surface-card border border-border-dim rounded-md shadow-xl overflow-y-auto"
       style={{ left: box.left, top: box.top, maxHeight: box.maxH }}
+      onContextMenu={(e) => e.preventDefault()}
     >
       <Section>
         <Item icon={<Undo2 size={12} />} label="Undo" shortcut="Ctrl+Z" disabled={!canUndo} onClick={() => run(undo)} />
@@ -312,6 +321,12 @@ export function CanvasContextMenu({ pos, onClose }: { pos: MenuPos; onClose: () 
           label="Paste style"
           disabled={!hasCopiedStyle || !hasSelection}
           onClick={() => run(pasteSelectedStyle)}
+        />
+        <Item
+          icon={<BookmarkPlus size={12} />}
+          label="Create style"
+          disabled={!hasSelection}
+          onClick={() => run(() => window.dispatchEvent(new Event(CREATE_STYLE_EVENT)))}
         />
         {imageOnly && isCroppableImage(objects[0]) && (
           <Item

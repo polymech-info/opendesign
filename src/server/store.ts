@@ -77,6 +77,16 @@ export type LibraryElement = {
   source?: Source;
 };
 
+export type SavedStyle = {
+  id: string;
+  name: string;
+  swatch?: string;
+  style: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+  source?: Source;
+};
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -394,6 +404,55 @@ export function createElement(
 
 export function deleteElement(roots: Roots, id: string) {
   return deleteLayer(roots, "elements", id);
+}
+
+export function listStyles(roots: Roots): SavedStyle[] {
+  const layered = mergeOrder(roots).map((entry) =>
+    readJsonDir<SavedStyle>(path.join(entry.root, "styles"), entry.layer)
+  );
+  return mergeByKey((row) => row.id, ...layered).sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+}
+
+export function createStyle(
+  roots: Roots,
+  input: { name?: string; swatch?: string; style: Record<string, unknown> }
+): SavedStyle {
+  const now = nowIso();
+  const row: SavedStyle = {
+    id: `s_${randomUUID()}`,
+    name: (input.name || "Style").trim() || "Style",
+    swatch: input.swatch,
+    style: input.style ?? {},
+    created_at: now,
+    updated_at: now,
+    source: "project",
+  };
+  writeLayer(roots, "styles", "project", row);
+  return row;
+}
+
+export function updateStyle(
+  roots: Roots,
+  id: string,
+  patch: { name?: string; swatch?: string; style?: Record<string, unknown> }
+): SavedStyle | null {
+  const hit = findInLayers<SavedStyle>(roots, "styles", id);
+  if (!hit) return null;
+  const name = patch.name != null ? patch.name.trim() || hit.row.name : hit.row.name;
+  const row: SavedStyle = {
+    ...hit.row,
+    name,
+    swatch: patch.swatch ?? hit.row.swatch,
+    style: patch.style ?? hit.row.style,
+    updated_at: nowIso(),
+    source: hit.layer,
+  };
+  writeLayer(roots, "styles", hit.layer, row);
+  return row;
+}
+
+export function deleteStyle(roots: Roots, id: string) {
+  return deleteLayer(roots, "styles", id);
 }
 
 export function designOwningLayer(roots: Roots, id: string) {

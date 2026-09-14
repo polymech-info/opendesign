@@ -70,3 +70,13 @@ export interface LibraryElement {
   height: number;
   created_at: string;
 }
+
+export interface SavedStyle {
+  id: string;
+  name: string;
+  swatch?: string;
+  style: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+  source?: "global" | "project";
+}

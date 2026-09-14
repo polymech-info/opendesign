@@ -1,36 +1,87 @@
 @import "tailwindcss";
 
+:root {
+  color-scheme: light;
+  --opend-surface: #F3F4F7;
+  --opend-surface-secondary: #FFFFFF;
+  --opend-surface-card: #FFFFFF;
+  --opend-surface-hover: #E8EAEF;
+  --opend-surface-muted: #F4F4F5;
+  --opend-border: #E2E5EB;
+  --opend-border-mid: #D1D5DB;
+  --opend-fg: #27272a;
+  --opend-fg-secondary: #52525b;
+  --opend-fg-muted: #a1a1aa;
+  --opend-accent-light: rgba(99, 102, 241, 0.08);
+}
+
+html.dark {
+  color-scheme: dark;
+  --opend-surface: #121318;
+  --opend-surface-secondary: #1a1b20;
+  --opend-surface-card: #1c1d22;
+  --opend-surface-hover: #26272e;
+  --opend-surface-muted: #22232a;
+  --opend-border: #2c2d34;
+  --opend-border-mid: #3a3b44;
+  --opend-fg: #ececef;
+  --opend-fg-secondary: #b4b5bc;
+  --opend-fg-muted: #7c7d86;
+  --opend-accent-light: rgba(99, 102, 241, 0.16);
+}
+
 @theme {
-  --color-surface: #F3F4F7;
-  --color-surface-secondary: #FFFFFF;
-  --color-surface-card: #FFFFFF;
-  --color-surface-hover: #E8EAEF;
-  --color-border-dim: #E2E5EB;
-  --color-border-mid: #D1D5DB;
+  --color-surface: var(--opend-surface);
+  --color-surface-secondary: var(--opend-surface-secondary);
+  --color-surface-card: var(--opend-surface-card);
+  --color-surface-hover: var(--opend-surface-hover);
+  --color-surface-muted: var(--opend-surface-muted);
+  --color-border-dim: var(--opend-border);
+  --color-border-mid: var(--opend-border-mid);
+  --color-fg: var(--opend-fg);
+  --color-fg-secondary: var(--opend-fg-secondary);
+  --color-fg-muted: var(--opend-fg-muted);
   --color-accent: #6366f1;
   --color-accent-hover: #4f46e5;
-  --color-accent-light: rgba(99, 102, 241, 0.08);
+  --color-accent-light: var(--opend-accent-light);
 }
 
 /* ── Base ──────────────────────────────────────────────────────────── */
 html, body, #app {
   @apply h-full w-full overflow-hidden;
+  overscroll-behavior: none;
+}
+
+#opend-canvas-scroll {
+  overflow-anchor: none;
+}
+
+/* Fabric IText caret lives on document.body at unscaled canvas coords.
+   CSS zoom + that offset would scroll the window and lock the designer. */
+textarea[data-fabric="textarea"] {
+  position: fixed !important;
+  left: 8px !important;
+  top: 8px !important;
+  width: 1px !important;
+  height: 1px !important;
+  opacity: 0 !important;
+  pointer-events: none;
 }
 
 body {
-  @apply bg-surface text-zinc-800 text-[13px] antialiased;
+  @apply bg-surface text-fg text-[13px] antialiased;
   font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
 /* ── Scrollbar ─────────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { @apply bg-zinc-300 rounded-full; }
-::-webkit-scrollbar-thumb:hover { @apply bg-zinc-400; }
+::-webkit-scrollbar-thumb { @apply bg-border-mid rounded-full; }
+::-webkit-scrollbar-thumb:hover { @apply bg-fg-muted; }
 
 /* ── Spinner ───────────────────────────────────────────────────────── */
 .spinner {
-  @apply inline-block w-3.5 h-3.5 rounded-full border-2 border-zinc-300 border-t-current;
+  @apply inline-block w-3.5 h-3.5 rounded-full border-2 border-border-mid border-t-current;
   animation: spin 0.6s linear infinite;
 }
 
@@ -43,6 +94,12 @@ body {
     0 25px 50px -12px rgba(0, 0, 0, 0.15) !important;
 }
 
+html.dark .canvas-container {
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.06),
+    0 25px 50px -12px rgba(0, 0, 0, 0.45) !important;
+}
+
 /* ── Custom range slider ───────────────────────────────────────────── */
 input[type="range"]:not(.prop-slider-range) {
   @apply appearance-none bg-transparent cursor-pointer;
@@ -50,44 +107,45 @@ input[type="range"]:not(.prop-slider-range) {
 }
 
 input[type="range"]:not(.prop-slider-range)::-webkit-slider-track {
-  @apply bg-zinc-200 rounded-full;
+  @apply bg-surface-muted rounded-full;
   height: 4px;
 }
 
 input[type="range"]:not(.prop-slider-range)::-webkit-slider-thumb {
-  @apply appearance-none w-3.5 h-3.5 rounded-full bg-accent border-2 border-white;
+  @apply appearance-none w-3.5 h-3.5 rounded-full bg-accent border-2 border-surface-card;
   margin-top: -5px;
 }
 
 input.prop-slider-range {
   @apply absolute inset-0 w-full m-0 p-0 appearance-none bg-transparent cursor-pointer;
-  height: 16px;
+  height: 24px;
+  touch-action: none;
 }
 
 input.prop-slider-range::-webkit-slider-runnable-track {
   background: transparent;
-  height: 16px;
+  height: 24px;
   border: none;
 }
 
 input.prop-slider-range::-webkit-slider-thumb {
-  @apply appearance-none w-2.5 h-2.5 rounded-full bg-white border-[1.5px] border-accent;
-  margin-top: 3px;
+  @apply appearance-none w-3.5 h-3.5 rounded-full bg-surface-card border-[1.5px] border-accent;
+  margin-top: 5px;
   box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.18);
 }
 
 input.prop-slider-range::-moz-range-track {
   background: transparent;
-  height: 3px;
+  height: 24px;
   border: none;
 }
 
 input.prop-slider-range::-moz-range-thumb {
-  width: 10px;
-  height: 10px;
+  width: 14px;
+  height: 14px;
   border: 1.5px solid #6366f1;
   border-radius: 999px;
-  background: #fff;
+  background: var(--opend-surface-card);
   box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.18);
 }
 
@@ -113,7 +171,7 @@ input[type="color"]::-webkit-color-swatch {
 .chat-md > *:last-child { margin-bottom: 0; }
 .chat-md p { @apply my-1.5; }
 .chat-md h1, .chat-md h2, .chat-md h3, .chat-md h4 {
-  @apply font-semibold text-zinc-900 mt-2 mb-1;
+  @apply font-semibold text-fg mt-2 mb-1;
 }
 .chat-md h1 { @apply text-[15px]; }
 .chat-md h2 { @apply text-[13px]; }
@@ -124,21 +182,21 @@ input[type="color"]::-webkit-color-swatch {
 .chat-md li { @apply my-0.5; }
 .chat-md a { @apply text-accent underline underline-offset-2 break-all; }
 .chat-md blockquote {
-  @apply my-1.5 pl-2 border-l-2 border-zinc-300 text-zinc-600;
+  @apply my-1.5 pl-2 border-l-2 border-border-mid text-fg-secondary;
 }
 .chat-md pre {
   @apply my-1.5 p-2 rounded-md bg-zinc-800 text-zinc-100 overflow-x-auto text-[11px];
 }
 .chat-md :not(pre) > code {
-  @apply px-1 py-0.5 rounded bg-zinc-200/80 text-[11px] font-mono;
+  @apply px-1 py-0.5 rounded bg-surface-muted text-[11px] font-mono;
 }
 .chat-md img {
-  @apply my-1 rounded-md border border-zinc-200 max-w-[200px] max-h-[200px] object-cover;
+  @apply my-1 rounded-md border border-border-dim max-w-[200px] max-h-[200px] object-cover;
 }
 .chat-md table { @apply my-1.5 w-full text-[11px] border-collapse; }
-.chat-md th, .chat-md td { @apply border border-zinc-200 px-1.5 py-0.5 text-left; }
-.chat-md th { @apply bg-zinc-50 font-medium; }
-.chat-md hr { @apply my-2 border-zinc-200; }
+.chat-md th, .chat-md td { @apply border border-border-dim px-1.5 py-0.5 text-left; }
+.chat-md th { @apply bg-surface-muted font-medium; }
+.chat-md hr { @apply my-2 border-border-dim; }
 
 select {
   @apply appearance-none;
@@ -146,4 +204,8 @@ select {
   background-repeat: no-repeat;
   background-position: right 8px center;
   padding-right: 28px;
+}
+
+html.dark select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23a1a1aa' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
 }

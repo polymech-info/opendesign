@@ -3,6 +3,7 @@ import { iconAssetUrl } from "./icons";
 import { parseDsl } from "./parse";
 import { serializeDsl } from "./serialize";
 import { glassFromProps } from "./glass";
+import { borderFromProps } from "./border";
 import { shadowFromProps } from "./shadow";
 import { uploadPublicUrl } from "./upload-paths";
 import { pruneDocumentToCanvas } from "./props-sync";
@@ -80,12 +81,14 @@ function withVisualExtras(
   opts?: { glass?: boolean },
 ): FabricObjectJSON {
   const glass = opts?.glass ? glassFromProps(props) : { enabled: false, extras: {} };
-  const out: FabricObjectJSON = { ...obj, ...glass.extras };
+  const border = opts?.glass && !glass.enabled ? borderFromProps(props) : { enabled: false, extras: {} };
+  const overlay = glass.enabled ? glass : border;
+  const out: FabricObjectJSON = { ...obj, ...overlay.extras };
   const shadow = shadowFromProps(props);
   if (shadow) {
     out.shadow = shadow;
     out.objectCaching = false;
-  } else if (glass.enabled) {
+  } else if (overlay.enabled) {
     out.objectCaching = false;
   }
   return out;

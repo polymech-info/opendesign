@@ -210,6 +210,8 @@ Lists MERGE both folders (union). Same id/filename: project copy is used; unique
 - GET /api/templates/{id}
 - GET/POST /api/elements
 - DELETE /api/elements/{id}
+- GET/POST /api/styles
+- PUT/DELETE /api/styles/{id}
 - POST /api/export/png
 - GET/POST /api/uploads
 - GET/DELETE /api/uploads/file/{key}
@@ -750,6 +752,26 @@ Lists MERGE both folders (union). Same id/filename: project copy is used; unique
 
   app.delete("/api/elements/:id", (c) => {
     store.deleteElement(roots, c.req.param("id"));
+    return c.json({ ok: true }, 200);
+  });
+
+  app.get("/api/styles", (c) => c.json(store.listStyles(roots), 200));
+
+  app.post("/api/styles", async (c) => {
+    const body = await c.req.json<{ name?: string; swatch?: string; style?: Record<string, unknown> }>();
+    if (!body?.style || typeof body.style !== "object") return c.json({ error: "Missing style" }, 400);
+    return c.json(store.createStyle(roots, { name: body.name, swatch: body.swatch, style: body.style }), 200);
+  });
+
+  app.put("/api/styles/:id", async (c) => {
+    const body = await c.req.json<{ name?: string; swatch?: string; style?: Record<string, unknown> }>().catch(() => ({}));
+    const row = store.updateStyle(roots, c.req.param("id"), body ?? {});
+    if (!row) return c.json({ error: "Not found" }, 404);
+    return c.json(row, 200);
+  });
+
+  app.delete("/api/styles/:id", (c) => {
+    if (!store.deleteStyle(roots, c.req.param("id"))) return c.json({ error: "Not found" }, 404);
     return c.json({ ok: true }, 200);
   });
 

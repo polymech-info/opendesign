@@ -39,7 +39,7 @@ function ElementPreview({ item }: { item: LibraryElement }) {
   return src ? (
     <img src={src} alt={item.name} class="w-full h-full object-contain" />
   ) : (
-    <span class="text-[10px] text-zinc-300">…</span>
+    <span class="text-[10px] text-fg-muted">…</span>
   );
 }
 
@@ -77,7 +77,7 @@ export function ElementsLibrary({
 
   if (items.length === 0) {
     return (
-      <p class="text-zinc-400 text-[11px] m-0">
+      <p class="text-fg-muted text-[11px] m-0">
         Saved groups show up here. Name a group in the right panel, then As Element.
       </p>
     );
@@ -86,17 +86,17 @@ export function ElementsLibrary({
   return (
     <div class="grid grid-cols-2 gap-1.5">
       {items.map((item) => (
-        <div key={item.id} class="group relative rounded-md overflow-hidden border border-zinc-200 bg-zinc-50">
+        <div key={item.id} class="group relative rounded-md overflow-hidden border border-border-dim bg-surface-muted">
           <button
-            class="block w-full aspect-square p-1.5 border-none cursor-pointer bg-zinc-50"
+            class="block w-full aspect-square p-1.5 border-none cursor-pointer bg-surface-muted"
             title={item.name}
             onClick={() => onPick(item.canvas_json, item.name, item.id)}
           >
             <ElementPreview item={item} />
           </button>
-          <p class="px-1.5 pb-1.5 text-[10px] text-zinc-500 truncate m-0">{item.name}</p>
+          <p class="px-1.5 pb-1.5 text-[10px] text-fg-muted truncate m-0">{item.name}</p>
           <button
-            class="absolute top-1 right-1 p-0.5 rounded bg-white/90 border border-zinc-200 text-zinc-400 hover:text-red-500 cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity"
+            class="absolute top-1 right-1 p-0.5 rounded bg-surface-card/90 border border-border-dim text-fg-muted hover:text-red-500 cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity"
             title="Remove from library"
             onClick={(e) => void remove(item, e)}
           >

@@ -2,10 +2,16 @@ import * as fabric from "fabric";
 import { applyImageCornerRadius, applyRectCornerRadius, readCornerRadius, readImageCornerRadius } from "./image-radius";
 import { collectIds, uniqueIfTaken, nextUnique, objectKindSlug } from "./object-identity";
 import {
+  applyBorderOptions,
   applyGlassOptions,
   applyStylePreset,
+  DEFAULT_BORDER_OPTIONS,
+  DEFAULT_GLASS_OPTIONS,
+  readBorderOptions,
   readGlassOptions,
   readStylePreset,
+  usesOverlayPreset,
+  type BorderOptions,
   type GlassOptions,
   type StylePresetId,
 } from "./style-presets";
@@ -38,6 +44,7 @@ export type CopiedObjectStyle = {
   cornerRadius?: number;
   stylePreset: StylePresetId;
   glassOptions: GlassOptions;
+  borderOptions: BorderOptions;
   fontFamily?: string;
   fontSize?: number;
   fontWeight?: string | number;
@@ -82,6 +89,54 @@ function clonePaint(fill: unknown): unknown {
     /* keep string/backup fill */
   }
   return undefined;
+}
+
+export function serializeCopiedStyle(style: CopiedObjectStyle): Record<string, unknown> {
+  const fill =
+    style.fill == null || typeof style.fill === "string"
+      ? style.fill
+      : typeof style.fill === "object" && typeof (style.fill as { toObject?: () => unknown }).toObject === "function"
+        ? (style.fill as { toObject: () => unknown }).toObject()
+        : undefined;
+  return { ...style, fill };
+}
+
+export function hydrateCopiedStyle(raw: unknown): CopiedObjectStyle | null {
+  if (!raw || typeof raw !== "object") return null;
+  const rec = raw as Partial<CopiedObjectStyle> & { fill?: unknown };
+  const fill = clonePaint(rec.fill) ?? (typeof rec.fill === "string" ? rec.fill : undefined);
+  return {
+    fill,
+    stroke: rec.stroke,
+    strokeWidth: rec.strokeWidth,
+    opacity: rec.opacity,
+    shadow: rec.shadow ?? null,
+    rx: rec.rx,
+    ry: rec.ry,
+    cornerRadius: rec.cornerRadius,
+    stylePreset: rec.stylePreset ?? "none",
+    glassOptions: { ...DEFAULT_GLASS_OPTIONS, ...rec.glassOptions },
+    borderOptions: { ...DEFAULT_BORDER_OPTIONS, ...rec.borderOptions },
+    fontFamily: rec.fontFamily,
+    fontSize: rec.fontSize,
+    fontWeight: rec.fontWeight,
+    fontStyle: rec.fontStyle,
+    underline: rec.underline,
+    textAlign: rec.textAlign,
+    lineHeight: rec.lineHeight,
+    charSpacing: rec.charSpacing,
+  };
+}
+
+export function styleSwatchCss(style: CopiedObjectStyle): string {
+  if (style.stylePreset === "glass") {
+    return "linear-gradient(180deg, rgba(255,255,255,0.55), rgba(160,200,255,0.12))";
+  }
+  if (style.stylePreset === "border") {
+    return "linear-gradient(180deg, rgba(255,255,255,0.12), transparent)";
+  }
+  if (typeof style.fill === "string" && style.fill) return style.fill;
+  return "#e2e8f0";
 }
 
 function snapshotFill(obj: fabric.FabricObject, icon: boolean, backupFill: unknown): unknown {
@@ -135,6 +190,7 @@ export function captureObjectStyle(obj: fabric.FabricObject): CopiedObjectStyle 
     shadow: snapshotShadow(obj),
     stylePreset,
     glassOptions: readGlassOptions(obj),
+    borderOptions: readBorderOptions(obj),
   };
   if (obj instanceof fabric.Rect) {
     style.cornerRadius = readCornerRadius(obj);
@@ -159,7 +215,7 @@ export function applyObjectStyle(obj: fabric.FabricObject, style: CopiedObjectSt
   const image = obj instanceof fabric.FabricImage;
   const icon = isIconObject(obj);
 
-  if (readStylePreset(obj) === "glass" && style.stylePreset !== "glass") {
+  if (usesOverlayPreset(readStylePreset(obj)) && !usesOverlayPreset(style.stylePreset)) {
     applyStylePreset(obj, "none");
   }
 
@@ -209,6 +265,9 @@ export function applyObjectStyle(obj: fabric.FabricObject, style: CopiedObjectSt
         });
       }
     }
+    if (style.stylePreset === "border") {
+      applyBorderOptions(obj, style.borderOptions);
+    }
   }
 
   applyCopiedShadow(obj, style);
@@ -238,6 +297,7 @@ const STYLE_PATCH_KEYS = new Set([
   "objectCaching",
   "_stylePreset",
   "_glassOptions",
+  "_borderOptions",
   "fontSize",
   "fontFamily",
   "fontWeight",
@@ -273,6 +333,10 @@ export function applyObjectPatch(obj: fabric.FabricObject, props: Record<string,
     applyGlassOptions(obj, (next._glassOptions ?? {}) as Partial<GlassOptions>);
     delete next._glassOptions;
   }
+  if ("_borderOptions" in next) {
+    applyBorderOptions(obj, (next._borderOptions ?? {}) as Partial<BorderOptions>);
+    delete next._borderOptions;
+  }
   if (isIconObject(obj) && "fill" in next) {
     applyIconFill(obj, String(next.fill ?? ""));
     delete next.fill;
@@ -292,7 +356,7 @@ export function applyObjectPatch(obj: fabric.FabricObject, props: Record<string,
     next._id = value ? uniqueIfTaken(value, taken) : nextUnique(objectKindSlug(obj), taken);
   }
   obj.set(next as Partial<fabric.FabricObject>);
-  if (readStylePreset(obj) === "glass" && ("fill" in props || "stroke" in props || "strokeWidth" in props)) {
+  if (usesOverlayPreset(readStylePreset(obj)) && ("fill" in props || "stroke" in props || "strokeWidth" in props)) {
     const styled = obj as fabric.FabricObject & {
       _stylePresetBackup?: {
         fill: unknown;

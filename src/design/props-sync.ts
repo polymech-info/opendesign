@@ -11,6 +11,8 @@ export const STYLE_PROPS = new Set([
   "shadow",
   "glass",
   "glassOptions",
+  "border",
+  "borderOptions",
   "size",
   "font",
   "weight",

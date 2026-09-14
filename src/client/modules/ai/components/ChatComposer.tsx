@@ -50,7 +50,7 @@ export function ChatComposer({
   return (
     <div
       ref={composerRef}
-      class={`border-t border-zinc-200 p-2 flex flex-col shrink-0 relative ${isDragging ? "bg-accent/5" : ""}`}
+      class={`border-t border-border-dim p-2 flex flex-col shrink-0 relative ${isDragging ? "bg-accent/5" : ""}`}
       onDragEnter={onDragEnter}
       onDragLeave={onDragLeave}
       onDragOver={onDragOver}
@@ -68,7 +68,7 @@ export function ChatComposer({
       {attachments.length > 0 ? (
         <div class="flex gap-1.5 mb-2 flex-wrap">
           {attachments.map((att) => (
-            <div key={att.id} class="relative w-12 h-12 rounded-md overflow-hidden border border-zinc-200 group">
+            <div key={att.id} class="relative w-12 h-12 rounded-md overflow-hidden border border-border-dim group">
               <img src={att.url} alt={att.name} class="w-full h-full object-cover" />
               <button
                 type="button"
@@ -91,7 +91,7 @@ export function ChatComposer({
         ) : null}
         <button
           type="button"
-          class="h-8 w-8 shrink-0 rounded-md border-none bg-transparent text-zinc-400 hover:text-zinc-700 hover:bg-zinc-50 cursor-pointer"
+          class="h-8 w-8 shrink-0 rounded-md border-none bg-transparent text-fg-muted hover:text-fg hover:bg-surface-hover cursor-pointer"
           onClick={onOpenFilePicker}
           disabled={isGenerating}
           title="Attach image"
@@ -116,7 +116,7 @@ export function ChatComposer({
           onPaste={onPaste}
           placeholder="Message… Enter to send"
           rows={2}
-          class="flex-1 min-h-[40px] max-h-[120px] resize-none text-[12px] leading-relaxed px-2 py-1.5 rounded-md border border-zinc-200 bg-white text-zinc-800 outline-none focus:border-accent"
+          class="flex-1 min-h-[40px] max-h-[120px] resize-none text-[12px] leading-relaxed px-2 py-1.5 rounded-md border border-border-dim bg-surface-card text-fg outline-none focus:border-accent"
           disabled={isGenerating}
         />
 

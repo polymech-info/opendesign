@@ -26,12 +26,15 @@ import { isElementGroup } from "../lib/element-group";
 import { selectedCanvasObjects } from "../lib/object-style";
 import { stackTargetsFromSelection } from "../lib/layer-stack";
 import { saveAppScreenshot } from "../lib/capture-app";
+import { ThemeToggle } from "./theme-toggle";
+import { editorHref } from "../lib/editor-path";
+import { useRoutePanel } from "../hooks/use-app-navigate";
 
 function panelBtnClass(open: boolean) {
   return `p-1.5 rounded-md border-none cursor-pointer transition-all ${
     open
-      ? "text-zinc-900 bg-zinc-100 hover:bg-zinc-200"
-      : "text-zinc-400 bg-transparent hover:bg-zinc-100 hover:text-zinc-900"
+      ? "text-fg bg-surface-muted hover:bg-surface-hover"
+      : "text-fg-muted bg-transparent hover:bg-surface-hover hover:text-fg"
   }`;
 }
 
@@ -81,6 +84,7 @@ export function Toolbar({
     bringSelectionToFront,
     sendSelectionToBack,
   } = useEditor();
+  const panel = useRoutePanel();
   void selectionEpoch;
 
   const selectedCount = selectedCanvasObjects(canvas, selectedObject).length;
@@ -99,6 +103,9 @@ export function Toolbar({
     (s) => s.width === canvasWidth && s.height === canvasHeight
   );
   const sizeLabel = currentSize ? currentSize.label : `${canvasWidth} x ${canvasHeight}`;
+  const zoomPct = Math.round((zoom / (fitScale || 1)) * 100);
+  const viewW = Math.max(1, Math.round(canvasWidth * zoom));
+  const viewH = Math.max(1, Math.round(canvasHeight * zoom));
 
   const startRename = () => {
     if (!activeDesign) return;
@@ -149,11 +156,11 @@ export function Toolbar({
   };
 
   return (
-    <div class="flex items-center justify-between px-3 py-1.5 bg-white border-b border-zinc-200 shrink-0">
+    <div class="flex items-center justify-between px-3 py-1.5 bg-surface-card border-b border-border-dim shrink-0">
       {/* Left: Home + Design name + Canvas size */}
       <div class="flex items-center gap-3">
         <button
-          class="p-1.5 rounded-md text-zinc-400 bg-transparent border-none cursor-pointer transition-all hover:bg-zinc-100 hover:text-zinc-900"
+          class="p-1.5 rounded-md text-fg-muted bg-transparent border-none cursor-pointer transition-all hover:bg-surface-hover hover:text-fg"
           onClick={() => navigate("/")}
           title="Back to designs"
         >
@@ -169,7 +176,7 @@ export function Toolbar({
         {activeDesign && (
           editingName ? (
             <input
-              class="bg-zinc-100 border border-accent rounded px-2 py-0.5 text-xs text-zinc-900 outline-none w-40"
+              class="bg-surface-muted border border-accent rounded px-2 py-0.5 text-xs text-fg outline-none w-40"
               value={nameValue}
               onInput={(e) => setNameValue((e.target as HTMLInputElement).value)}
               onBlur={finishRename}
@@ -181,7 +188,7 @@ export function Toolbar({
             />
           ) : (
             <span
-              class="text-xs font-semibold text-zinc-600 cursor-pointer hover:text-zinc-900 transition-colors"
+              class="text-xs font-semibold text-fg-secondary cursor-pointer hover:text-fg transition-colors"
               onDblClick={startRename}
             >
               {activeDesign.name}
@@ -200,7 +207,7 @@ export function Toolbar({
 
         <div class="relative">
           <button
-            class="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium text-zinc-400 bg-zinc-100 border border-zinc-300 cursor-pointer hover:text-zinc-900 hover:border-zinc-500 transition-all"
+            class="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium text-fg-muted bg-surface-muted border border-border-mid cursor-pointer hover:text-fg hover:border-border-mid transition-all"
             onClick={() => setShowSizeDropdown(!showSizeDropdown)}
           >
             {sizeLabel}
@@ -209,14 +216,14 @@ export function Toolbar({
           {showSizeDropdown && (
             <>
               <div class="fixed inset-0 z-10" onClick={() => setShowSizeDropdown(false)} />
-              <div class="absolute top-full left-0 mt-1 bg-white border border-zinc-300 rounded-lg shadow-xl z-20 min-w-[200px] py-1">
+              <div class="absolute top-full left-0 mt-1 bg-surface-card border border-border-mid rounded-lg shadow-xl z-20 min-w-[200px] py-1">
                 {CANVAS_SIZES.map((s) => (
                   <button
                     key={s.label}
                     class={`w-full text-left px-3 py-1.5 text-xs cursor-pointer border-none transition-colors ${
                       s.width === canvasWidth && s.height === canvasHeight
                         ? "bg-accent/20 text-accent"
-                        : "text-zinc-600 bg-transparent hover:bg-zinc-100"
+                        : "text-fg-secondary bg-transparent hover:bg-surface-hover"
                     }`}
                     onClick={() => {
                       setCanvasSize(s.width, s.height);
@@ -224,7 +231,7 @@ export function Toolbar({
                     }}
                   >
                     <span class="font-medium">{s.label}</span>
-                    <span class="text-zinc-400 ml-2">
+                    <span class="text-fg-muted ml-2">
                       {s.width} x {s.height}
                     </span>
                   </button>
@@ -238,7 +245,7 @@ export function Toolbar({
       {/* Center: Undo / Redo / Group */}
       <div class="flex items-center gap-1">
         <button
-          class="p-1.5 rounded-md text-zinc-400 bg-transparent border-none cursor-pointer transition-all hover:bg-zinc-100 hover:text-zinc-900 disabled:opacity-30 disabled:cursor-not-allowed"
+          class="p-1.5 rounded-md text-fg-muted bg-transparent border-none cursor-pointer transition-all hover:bg-surface-hover hover:text-fg disabled:opacity-30 disabled:cursor-not-allowed"
           onClick={undo}
           disabled={!canUndo}
           title="Undo (Cmd+Z)"
@@ -246,16 +253,16 @@ export function Toolbar({
           <Undo2 size={16} />
         </button>
         <button
-          class="p-1.5 rounded-md text-zinc-400 bg-transparent border-none cursor-pointer transition-all hover:bg-zinc-100 hover:text-zinc-900 disabled:opacity-30 disabled:cursor-not-allowed"
+          class="p-1.5 rounded-md text-fg-muted bg-transparent border-none cursor-pointer transition-all hover:bg-surface-hover hover:text-fg disabled:opacity-30 disabled:cursor-not-allowed"
           onClick={redo}
           disabled={!canRedo}
           title="Redo (Cmd+Shift+Z)"
         >
           <Redo2 size={16} />
         </button>
-        <div class="w-px h-5 bg-zinc-300 mx-1" />
+        <div class="w-px h-5 bg-border-mid mx-1" />
         <button
-          class="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold border border-zinc-300 cursor-pointer transition-all bg-transparent text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 disabled:opacity-30 disabled:cursor-not-allowed"
+          class="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold border border-border-mid cursor-pointer transition-all bg-transparent text-fg-secondary hover:bg-surface-hover hover:text-fg disabled:opacity-30 disabled:cursor-not-allowed"
           onClick={sendSelectionToBack}
           disabled={!canRestack}
           title="Send selected to back (Ctrl+[)"
@@ -264,7 +271,7 @@ export function Toolbar({
           Back
         </button>
         <button
-          class="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold border border-zinc-300 cursor-pointer transition-all bg-transparent text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 disabled:opacity-30 disabled:cursor-not-allowed"
+          class="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold border border-border-mid cursor-pointer transition-all bg-transparent text-fg-secondary hover:bg-surface-hover hover:text-fg disabled:opacity-30 disabled:cursor-not-allowed"
           onClick={bringSelectionToFront}
           disabled={!canRestack}
           title="Bring selected to front (Ctrl+])"
@@ -272,9 +279,9 @@ export function Toolbar({
           <BringToFront size={13} />
           Front
         </button>
-        <div class="w-px h-5 bg-zinc-300 mx-1" />
+        <div class="w-px h-5 bg-border-mid mx-1" />
         <button
-          class="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold border border-zinc-300 cursor-pointer transition-all bg-transparent text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 disabled:opacity-30 disabled:cursor-not-allowed"
+          class="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold border border-border-mid cursor-pointer transition-all bg-transparent text-fg-secondary hover:bg-surface-hover hover:text-fg disabled:opacity-30 disabled:cursor-not-allowed"
           onClick={groupSelected}
           disabled={!canGroup}
           title="Group selected (Ctrl+G)"
@@ -283,7 +290,7 @@ export function Toolbar({
           Group
         </button>
         <button
-          class="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold border border-zinc-300 cursor-pointer transition-all bg-transparent text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 disabled:opacity-30 disabled:cursor-not-allowed"
+          class="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold border border-border-mid cursor-pointer transition-all bg-transparent text-fg-secondary hover:bg-surface-hover hover:text-fg disabled:opacity-30 disabled:cursor-not-allowed"
           onClick={ungroupSelected}
           disabled={!canUngroup}
           title="Ungroup (Ctrl+Shift+G)"
@@ -292,7 +299,7 @@ export function Toolbar({
           Ungroup
         </button>
         <button
-          class="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold border border-zinc-300 cursor-pointer transition-all bg-transparent text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 disabled:opacity-30 disabled:cursor-not-allowed"
+          class="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold border border-border-mid cursor-pointer transition-all bg-transparent text-fg-secondary hover:bg-surface-hover hover:text-fg disabled:opacity-30 disabled:cursor-not-allowed"
           onClick={() => void saveSelectionAsElement()}
           disabled={!canSaveElement}
           title="Save to Elements library"
@@ -305,38 +312,41 @@ export function Toolbar({
       {/* Right: Zoom + Export + Save */}
       <div class="flex items-center gap-1.5">
         <button
-          class="p-1.5 rounded-md text-zinc-400 bg-transparent border-none cursor-pointer transition-all hover:bg-zinc-100 hover:text-zinc-900"
+          class="p-1.5 rounded-md text-fg-muted bg-transparent border-none cursor-pointer transition-all hover:bg-surface-hover hover:text-fg"
           onClick={zoomOut}
           title="Zoom out"
         >
           <ZoomOut size={15} />
         </button>
-        <span class="text-[11px] text-zinc-400 font-mono w-10 text-center">
-          {Math.round((zoom / (fitScale || 1)) * 100)}%
+        <span
+          class="text-[11px] text-fg-muted font-mono text-center whitespace-nowrap min-w-10 px-0.5"
+          title={`Artboard ${canvasWidth} × ${canvasHeight} at ${zoomPct}%`}
+        >
+          {zoomPct}% ({viewW} × {viewH})
         </span>
         <button
-          class="p-1.5 rounded-md text-zinc-400 bg-transparent border-none cursor-pointer transition-all hover:bg-zinc-100 hover:text-zinc-900"
+          class="p-1.5 rounded-md text-fg-muted bg-transparent border-none cursor-pointer transition-all hover:bg-surface-hover hover:text-fg"
           onClick={zoomIn}
           title="Zoom in"
         >
           <ZoomIn size={15} />
         </button>
         <button
-          class="p-1.5 rounded-md text-zinc-400 bg-transparent border-none cursor-pointer transition-all hover:bg-zinc-100 hover:text-zinc-900"
+          class="p-1.5 rounded-md text-fg-muted bg-transparent border-none cursor-pointer transition-all hover:bg-surface-hover hover:text-fg"
           onClick={zoomToFit}
           title="Fit to screen"
         >
           <Maximize size={15} />
         </button>
 
-        <div class="w-px h-5 bg-zinc-300 mx-1" />
+        <div class="w-px h-5 bg-border-mid mx-1" />
 
         <button
-          class="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-semibold border border-zinc-300 cursor-pointer transition-all bg-transparent text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 disabled:opacity-50 disabled:cursor-not-allowed"
+          class="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-semibold border border-border-mid cursor-pointer transition-all bg-transparent text-fg-secondary hover:bg-surface-hover hover:text-fg disabled:opacity-50 disabled:cursor-not-allowed"
           onClick={async () => {
             if (!activeDesign) return;
             const id = await duplicateDesign(activeDesign.id);
-            if (id) navigate(`/design/${id}`);
+            if (id) navigate(editorHref(id, panel ?? "templates"));
           }}
           disabled={saving || !activeDesign}
           title="Duplicate this design"
@@ -345,7 +355,7 @@ export function Toolbar({
           Duplicate
         </button>
         <button
-          class="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-semibold border border-zinc-300 cursor-pointer transition-all bg-transparent text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 disabled:opacity-50 disabled:cursor-not-allowed"
+          class="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-semibold border border-border-mid cursor-pointer transition-all bg-transparent text-fg-secondary hover:bg-surface-hover hover:text-fg disabled:opacity-50 disabled:cursor-not-allowed"
           onClick={async () => {
             const ok = await copyDesignToClipboard();
             flashNotice(ok ? "Copied to clipboard" : "Could not copy to clipboard");
@@ -357,7 +367,7 @@ export function Toolbar({
           Copy
         </button>
         <button
-          class="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-semibold border border-zinc-300 cursor-pointer transition-all bg-transparent text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900"
+          class="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-semibold border border-border-mid cursor-pointer transition-all bg-transparent text-fg-secondary hover:bg-surface-hover hover:text-fg"
           onClick={(e) => {
             const name = activeDesign?.name;
             if (e.shiftKey) {
@@ -375,7 +385,7 @@ export function Toolbar({
           PNG
         </button>
         <button
-          class="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-semibold border border-zinc-300 cursor-pointer transition-all bg-transparent text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900"
+          class="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-semibold border border-border-mid cursor-pointer transition-all bg-transparent text-fg-secondary hover:bg-surface-hover hover:text-fg"
           onClick={exportJSON}
           title="Export as JSON"
         >
@@ -392,7 +402,7 @@ export function Toolbar({
           {saving ? "Saving..." : "Save"}
         </button>
         <button
-          class="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-semibold border border-zinc-300 cursor-pointer transition-all bg-transparent text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 disabled:opacity-50 disabled:cursor-not-allowed"
+          class="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-semibold border border-border-mid cursor-pointer transition-all bg-transparent text-fg-secondary hover:bg-surface-hover hover:text-fg disabled:opacity-50 disabled:cursor-not-allowed"
           disabled={capturingApp}
           onClick={() => {
             setCapturingApp(true);
@@ -406,6 +416,7 @@ export function Toolbar({
           <Camera size={13} />
           {capturingApp ? "Capturing..." : "Shot"}
         </button>
+        <ThemeToggle />
         <button
           class={panelBtnClass(rightPanelOpen)}
           onClick={onToggleRightPanel}

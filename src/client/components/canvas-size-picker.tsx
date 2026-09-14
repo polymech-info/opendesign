@@ -8,7 +8,7 @@ import {
 } from "../lib/canvas-size";
 
 const inputClass =
-  "w-full min-w-0 bg-white border border-zinc-300 rounded-md text-xs text-zinc-700 px-2 py-1.5 outline-none focus:border-accent font-mono";
+  "w-full min-w-0 bg-surface-card border border-border-mid rounded-md text-xs text-fg-secondary px-2 py-1.5 outline-none focus:border-accent font-mono";
 
 function CustomSizeFields({
   width,
@@ -49,7 +49,7 @@ function CustomSizeFields({
     <div class="flex flex-col gap-2">
       <div class="flex items-center gap-1.5">
         <label class="flex-1 min-w-0">
-          <span class="block text-[10px] uppercase tracking-wide text-zinc-400 mb-1">W</span>
+          <span class="block text-[10px] uppercase tracking-wide text-fg-muted mb-1">W</span>
           <input
             type="number"
             min={CANVAS_SIZE_MIN}
@@ -64,14 +64,14 @@ function CustomSizeFields({
         </label>
         <button
           type="button"
-          class="mt-4 p-1.5 rounded-md text-zinc-400 bg-transparent border border-transparent cursor-pointer hover:bg-zinc-100 hover:text-zinc-700"
+          class="mt-4 p-1.5 rounded-md text-fg-muted bg-transparent border border-transparent cursor-pointer hover:bg-surface-hover hover:text-fg"
           title="Swap width and height"
           onClick={swap}
         >
           <ArrowLeftRight size={13} />
         </button>
         <label class="flex-1 min-w-0">
-          <span class="block text-[10px] uppercase tracking-wide text-zinc-400 mb-1">H</span>
+          <span class="block text-[10px] uppercase tracking-wide text-fg-muted mb-1">H</span>
           <input
             type="number"
             min={CANVAS_SIZE_MIN}
@@ -87,7 +87,7 @@ function CustomSizeFields({
       </div>
       <button
         type="button"
-        class="w-full px-2 py-1.5 rounded-md text-[11px] font-semibold border-none cursor-pointer bg-zinc-100 text-zinc-700 hover:bg-zinc-200 disabled:opacity-40 disabled:cursor-not-allowed"
+        class="w-full px-2 py-1.5 rounded-md text-[11px] font-semibold border-none cursor-pointer bg-surface-muted text-fg-secondary hover:bg-surface-hover disabled:opacity-40 disabled:cursor-not-allowed"
         disabled={!parsed || unchanged}
         onClick={apply}
       >
@@ -115,12 +115,12 @@ function PresetList({
             key={s.label}
             type="button"
             class={`w-full text-left px-3 py-1.5 text-xs cursor-pointer border-none transition-colors ${
-              active ? "bg-accent/20 text-accent" : "text-zinc-600 bg-transparent hover:bg-zinc-100"
+              active ? "bg-accent/20 text-accent" : "text-fg-secondary bg-transparent hover:bg-surface-hover"
             }`}
             onClick={() => onSelect(s.width, s.height)}
           >
             <span class="font-medium">{s.label}</span>
-            <span class="text-zinc-400 ml-2">
+            <span class="text-fg-muted ml-2">
               {s.width} × {s.height}
             </span>
           </button>
@@ -143,13 +143,13 @@ export function CanvasSizeMenu({
 }) {
   return (
     <div class="min-w-[240px] py-1">
-      <p class="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-400">
+      <p class="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-fg-muted">
         Presets
       </p>
       <PresetList width={width} height={height} onSelect={onSelect} />
-      <div class="mx-3 my-2 border-t border-zinc-200" />
+      <div class="mx-3 my-2 border-t border-border-dim" />
       <div class="px-3 pb-2">
-        <p class="text-[10px] font-semibold uppercase tracking-wide text-zinc-400 mb-2">Custom</p>
+        <p class="text-[10px] font-semibold uppercase tracking-wide text-fg-muted mb-2">Custom</p>
         <CustomSizeFields width={width} height={height} onSelect={onSelect} applyLabel={customLabel} />
       </div>
     </div>
@@ -169,8 +169,8 @@ export function CanvasSizePanel({
     <div class="flex flex-col gap-3">
       <CustomSizeFields width={width} height={height} onSelect={onSelect} applyLabel="Resize canvas" />
       <div>
-        <p class="text-[10px] font-semibold uppercase tracking-wide text-zinc-400 mb-1">Presets</p>
-        <div class="max-h-48 overflow-y-auto -mx-1 rounded-md border border-zinc-200">
+        <p class="text-[10px] font-semibold uppercase tracking-wide text-fg-muted mb-1">Presets</p>
+        <div class="max-h-48 overflow-y-auto -mx-1 rounded-md border border-border-dim">
           <PresetList width={width} height={height} onSelect={onSelect} />
         </div>
       </div>

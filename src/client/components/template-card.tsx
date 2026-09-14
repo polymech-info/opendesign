@@ -40,12 +40,12 @@ export function TemplateCard({ template, onClick }: Props) {
 
   return (
     <button
-      class="group relative bg-white border border-zinc-200 rounded-lg overflow-hidden cursor-pointer transition-all hover:border-accent hover:shadow-lg hover:shadow-accent/10 p-0"
+      class="group relative bg-surface-card border border-border-dim rounded-lg overflow-hidden cursor-pointer transition-all hover:border-accent hover:shadow-lg hover:shadow-accent/10 p-0"
       onClick={onClick}
     >
       {/* Preview area */}
       <div
-        class="w-full flex items-center justify-center bg-zinc-50 overflow-hidden"
+        class="w-full flex items-center justify-center bg-surface-muted overflow-hidden"
         style={{ aspectRatio: `${template.width} / ${template.height}` }}
       >
         {preview ? (
@@ -55,15 +55,15 @@ export function TemplateCard({ template, onClick }: Props) {
             class="w-full h-full object-contain"
           />
         ) : (
-          <span class="text-zinc-300 text-[10px] font-medium">Loading...</span>
+          <span class="text-fg-muted text-[10px] font-medium">Loading...</span>
         )}
       </div>
       {/* Label */}
-      <div class="px-2 py-1.5 border-t border-zinc-200">
-        <span class="text-[10px] text-zinc-600 font-medium truncate block">
+      <div class="px-2 py-1.5 border-t border-border-dim">
+        <span class="text-[10px] text-fg-secondary font-medium truncate block">
           {template.name}
         </span>
-        <span class="text-[9px] text-zinc-400">
+        <span class="text-[9px] text-fg-muted">
           {template.width}&times;{template.height}
         </span>
       </div>

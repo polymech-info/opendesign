@@ -9,6 +9,7 @@ export type ListedUpload = {
   filename: string;
   url: string;
   source: Layer;
+  mtime: number;
 };
 
 const MIME: Record<string, string> = {
@@ -62,7 +63,7 @@ export function putUploadKey(
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, Buffer.from(data instanceof Uint8Array ? data : new Uint8Array(data)));
   const filename = safe.split("/").pop() || safe;
-  return { key: safe, filename, url: publicUrl(safe), source: layer };
+  return { key: safe, filename, url: publicUrl(safe), source: layer, mtime: Date.now() };
 }
 
 export function putUpload(
@@ -110,10 +111,11 @@ function listRoot(root: string, kind: UploadKind, layer: Layer): ListedUpload[] 
   const items: ListedUpload[] = [];
   for (const filename of fs.readdirSync(dir)) {
     const file = path.join(dir, filename);
-    if (!fs.statSync(file).isFile()) continue;
-    if (kind === "images" && (filename === "backgrounds" || filename === "icons" || filename === "screenshots")) continue;
+    const st = fs.statSync(file);
+    if (!st.isFile()) continue;
+    if (kind === "images" && (filename === "backgrounds" || filename === "icons" || filename === "screenshots" || filename === "thumbs")) continue;
     const key = prefix + filename;
-    items.push({ key, filename, url: publicUrl(key), source: layer });
+    items.push({ key, filename, url: publicUrl(key), source: layer, mtime: st.mtimeMs });
   }
   return items;
 }
@@ -124,5 +126,5 @@ export function listUploads(roots: Roots, kind: UploadKind): ListedUpload[] {
   for (const layer of layers) {
     for (const item of layer) map.set(item.filename, item);
   }
-  return [...map.values()].sort((a, b) => b.filename.localeCompare(a.filename));
+  return [...map.values()].sort((a, b) => b.mtime - a.mtime || b.filename.localeCompare(a.filename));
 }

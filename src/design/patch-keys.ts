@@ -8,7 +8,7 @@ export const PROJECTABLE_FIELDS: Record<NodeType, readonly string[]> = {
   theme: [],
   widget: [],
   use: ["x", "y", "w", "h"],
-  shape: ["fill", "stroke", "strokeWidth", "radius", "shadow", "glass", "glassOptions", "preset"],
+  shape: ["fill", "stroke", "strokeWidth", "radius", "shadow", "glass", "glassOptions", "border", "borderOptions", "preset"],
   txt: ["fill", "size", "font", "weight", "align", "text", "style", "shadow", "preset"],
   icon: ["icon", "fill", "shadow"],
   img: ["src", "fit"],
@@ -30,11 +30,11 @@ export const EDITOR_ONLY_FIELDS = [
 
 export function designPatchFieldHints(): string {
   return [
-    "shape.bg: fill, stroke, strokeWidth, radius, shadow={x,y,blur,color}|soft|hard, glass=true, glassOptions={...}",
+    "shape.bg: fill, stroke, strokeWidth, radius, shadow={x,y,blur,color}|soft|hard, glass=true, glassOptions={...}, border=true|line|rim, borderOptions={...}",
     "txt: fill, size, font, weight, align (textAlign only), text, style, shadow",
     "icon: fill, icon (glyph id), shadow",
     "preset card.soft etc. merge under node.props overrides",
-    "NOT projected: opacity, gradients, raw _stylePreset (use glass=true on shapes)",
+    "NOT projected: opacity, gradients, raw _stylePreset (use glass=true or border=true on shapes)",
   ].join("\n");
 }
 

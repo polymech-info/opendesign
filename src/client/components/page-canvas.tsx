@@ -9,16 +9,13 @@ interface PageCanvasProps {
   isActive: boolean;
   width: number;
   height: number;
-  onActivate: () => void;
 }
 
-export function PageCanvas({ page, isActive, width, height, onActivate }: PageCanvasProps) {
+export function PageCanvas({ page, isActive, width, height }: PageCanvasProps) {
   const { registerCanvas, unregisterCanvas, diskReloadEpoch } = useEditor();
   const canvasElRef = useRef<HTMLCanvasElement>(null);
   const fabricRef = useRef<fabric.Canvas | null>(null);
-  const onActivateRef = useRef(onActivate);
   const loadedEpochRef = useRef(0);
-  onActivateRef.current = onActivate;
 
   useEffect(() => {
     if (!canvasElRef.current || fabricRef.current) return;
@@ -152,9 +149,6 @@ export function PageCanvas({ page, isActive, width, height, onActivate }: PageCa
         c.requestRenderAll();
       });
     }
-
-    // On mouse down, activate this canvas (use ref to avoid stale closure)
-    c.on("mouse:down", () => onActivateRef.current());
 
     fabricRef.current = c;
     registerCanvas(page.id, c);

@@ -73,3 +73,12 @@ export function restoreLockedBackgrounds(canvas: fabric.StaticCanvas | fabric.Ca
     canvas.renderOnAddRemove = wasRendering;
   }
 }
+
+export function pagePhotoSrc(canvas: fabric.StaticCanvas | fabric.Canvas | null | undefined): string {
+  if (!canvas) return "";
+  const photo =
+    pageLayer(canvas, "canvas.photo") ??
+    canvas.getObjects().find((obj) => isBgImage(obj) && obj instanceof fabric.FabricImage);
+  if (!(photo instanceof fabric.FabricImage) || typeof photo.getSrc !== "function") return "";
+  return photo.getSrc() || "";
+}

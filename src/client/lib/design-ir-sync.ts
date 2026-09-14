@@ -71,7 +71,9 @@ export function syncObjectStyleInIr(obj: fabric.FabricObject) {
     if (style.stroke != null) set.stroke = style.stroke;
     if (style.strokeWidth != null) set.strokeWidth = style.strokeWidth;
     set.glass = style.stylePreset === "glass";
+    set.border = style.stylePreset === "border";
     if (style.stylePreset === "glass") set.glassOptions = style.glassOptions;
+    if (style.stylePreset === "border") set.borderOptions = style.borderOptions;
     set.shadow = shadow;
     if (style.cornerRadius != null) set.radius = style.cornerRadius;
   }

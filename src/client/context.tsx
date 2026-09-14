@@ -26,6 +26,7 @@ export interface EditorContextValue {
   registerCanvas: (pageId: string, canvas: fabric.Canvas) => void;
   unregisterCanvas: (pageId: string) => void;
   setActiveCanvas: (pageId: string) => void;
+  openContextMenuAt: (at: { pageId?: string; left?: number; top?: number; clientX: number; clientY: number }) => void;
   activeCanvasId: string | null;
   canvas: fabric.Canvas | null;
   selectedObject: fabric.FabricObject | null;
@@ -62,6 +63,7 @@ export interface EditorContextValue {
   duplicateSelected: () => Promise<void>;
   copySelectedStyle: () => void;
   pasteSelectedStyle: () => void;
+  applyCopiedObjectStyle: (style: import("./lib/object-style").CopiedObjectStyle) => void;
   hasCopiedStyle: boolean;
   groupSelected: () => void;
   ungroupSelected: () => void;

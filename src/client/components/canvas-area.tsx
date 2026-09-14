@@ -3,13 +3,20 @@ import { Plus, Copy, Trash2 } from "lucide-preact";
 import { useEditor } from "../context";
 import { PageCanvas } from "./page-canvas";
 import { acceptFileDrag, imageFilesFromDataTransfer } from "../lib/file-drop";
+import {
+  CANVAS_SCROLL_ID,
+  computeFitScale,
+  revealPageInScroller,
+  zoomIsAtFit,
+} from "../lib/canvas-viewport";
 
 export function CanvasArea() {
   const {
     pages, activePageId, setActiveCanvas, canvasWidth, canvasHeight,
-    zoom, setZoomRaw, setFitScale, addPage, duplicatePage, deletePage, renamePage,
+    zoom, fitScale, setZoomRaw, setFitScale, addPage, duplicatePage, deletePage, renamePage,
     addDroppedImages,
     readImageDropTarget,
+    openContextMenuAt,
   } = useEditor();
   const [dropHint, setDropHint] = useState<{
     pageId: string;
@@ -23,46 +30,61 @@ export function CanvasArea() {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const renameRef = useRef<HTMLInputElement>(null);
-
-  // Calculate fit scale on mount
-  useEffect(() => {
-    const wrapper = wrapperRef.current;
-    if (!wrapper) return;
-    const padding = 120;
-    const availW = wrapper.clientWidth - padding;
-    const fit = Math.min(availW / canvasWidth, 1);
-    setFitScale(fit);
-    setZoomRaw(0.58);
-  }, [canvasWidth, canvasHeight]);
-
-  // Recalculate on resize (rAF so sidebar width animation doesn't trip ResizeObserver loop)
   const fitScaleRef = useRef(0);
+  const zoomRef = useRef(zoom);
+  const revealAfterFitRef = useRef(false);
+  const pagesRef = useRef(pages);
+  const sizeRef = useRef({ canvasWidth, canvasHeight, activePageId });
+  pagesRef.current = pages;
+  sizeRef.current = { canvasWidth, canvasHeight, activePageId };
+  useEffect(() => { zoomRef.current = zoom; }, [zoom]);
+
+  // Fit the artboard to the scroller. Sidebar hide/show shrinks this box — if the
+  // user was at fit zoom, follow the new size so the page is not clipped.
   useEffect(() => {
     const wrapper = wrapperRef.current;
     if (!wrapper) return;
     let raf = 0;
-    const apply = () => {
+    const apply = (seedZoom: boolean) => {
       raf = 0;
-      const padding = 120;
-      const fit = Math.min((wrapper.clientWidth - padding) / canvasWidth, 1);
-      if (Math.abs(fit - fitScaleRef.current) < 0.001) return;
-      fitScaleRef.current = fit;
-      setFitScale(fit);
+      const fit = computeFitScale(wrapper.clientWidth, wrapper.clientHeight, canvasWidth, canvasHeight);
+      const prevFit = fitScaleRef.current;
+      const sized = wrapper.clientWidth > 40 && wrapper.clientHeight > 40;
+      const fitChanged = Math.abs(fit - prevFit) >= 0.001;
+      if (fitChanged || seedZoom) {
+        fitScaleRef.current = fit;
+        setFitScale(fit);
+      }
+      if (seedZoom) {
+        if (sized) setZoomRaw(fit);
+        return;
+      }
+      if (!fitChanged) return;
+      const atFit = prevFit < 0.05 || zoomIsAtFit(zoomRef.current, prevFit || fit);
+      if (atFit) {
+        revealAfterFitRef.current = true;
+        setZoomRaw(fit);
+      } else {
+        revealPageInScroller(sizeRef.current.activePageId, "auto");
+      }
     };
+    apply(true);
     const obs = new ResizeObserver(() => {
       if (raf) return;
-      raf = requestAnimationFrame(apply);
+      raf = requestAnimationFrame(() => apply(false));
     });
     obs.observe(wrapper);
     return () => {
       obs.disconnect();
       if (raf) cancelAnimationFrame(raf);
     };
-  }, [canvasWidth, canvasHeight, setFitScale]);
+  }, [canvasWidth, canvasHeight, setFitScale, setZoomRaw]);
 
-  // Cmd+wheel zoom towards mouse position
-  const zoomRef = useRef(zoom);
-  useEffect(() => { zoomRef.current = zoom; }, [zoom]);
+  useEffect(() => {
+    if (!revealAfterFitRef.current) return;
+    revealAfterFitRef.current = false;
+    revealPageInScroller(activePageId, "auto");
+  }, [zoom, fitScale, activePageId]);
 
   useEffect(() => {
     const wrapper = wrapperRef.current;
@@ -89,11 +111,6 @@ export function CanvasArea() {
     wrapper.addEventListener("wheel", handler, { passive: false });
     return () => wrapper.removeEventListener("wheel", handler);
   }, [setZoomRaw]);
-
-  const pagesRef = useRef(pages);
-  const sizeRef = useRef({ canvasWidth, canvasHeight, activePageId });
-  pagesRef.current = pages;
-  sizeRef.current = { canvasWidth, canvasHeight, activePageId };
 
   useEffect(() => {
     const wrapper = wrapperRef.current;
@@ -152,17 +169,31 @@ export function CanvasArea() {
       if (!files.length) return;
       void addDroppedImages(files, hit(e.clientX, e.clientY));
     };
+    const context = (e: MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const at = hit(e.clientX, e.clientY);
+      openContextMenuAt({
+        pageId: at?.pageId,
+        left: at?.left,
+        top: at?.top,
+        clientX: e.clientX,
+        clientY: e.clientY,
+      });
+    };
     wrapper.addEventListener("dragenter", over);
     wrapper.addEventListener("dragover", over);
     wrapper.addEventListener("dragleave", leave);
     wrapper.addEventListener("drop", drop);
+    wrapper.addEventListener("contextmenu", context, true);
     return () => {
       wrapper.removeEventListener("dragenter", over);
       wrapper.removeEventListener("dragover", over);
       wrapper.removeEventListener("dragleave", leave);
       wrapper.removeEventListener("drop", drop);
+      wrapper.removeEventListener("contextmenu", context, true);
     };
-  }, [addDroppedImages, readImageDropTarget]);
+  }, [addDroppedImages, readImageDropTarget, openContextMenuAt]);
 
   // Auto-activate first page if none active
   useEffect(() => {
@@ -191,30 +222,22 @@ export function CanvasArea() {
     setRenamingId(null);
   };
 
-  // Inverse scale for page headers so they don't zoom
-  const inverseScale = 1 / zoom;
+  const pageW = canvasWidth * zoom;
+  const pageH = canvasHeight * zoom;
 
   return (
     <div
+      id={CANVAS_SCROLL_ID}
       ref={wrapperRef}
-      class="flex-1 overflow-auto"
-      style={{ background: "#E8EAEF" }}
+      class="flex-1 overflow-auto bg-surface"
     >
-      {/* Spacer div — its dimensions match the visual (scaled) size so overflow scrollbars work */}
-      <div
-        style={{
-          width: Math.max((canvasWidth + 80) * zoom, wrapperRef.current?.clientWidth ?? 0),
-          minHeight: "100%",
-          display: "flex",
-          justifyContent: "center",
-        }}
-      >
       <div
         class="flex flex-col items-center"
         style={{
-          transform: `scale(${zoom})`,
-          transformOrigin: "center top",
+          minWidth: "100%",
+          minHeight: "100%",
           padding: "40px 40px 80px",
+          boxSizing: "border-box",
         }}
       >
         {pages.map((page) => (
@@ -222,32 +245,20 @@ export function CanvasArea() {
             key={page.id}
             class="mb-10"
             data-page-id={page.id}
+            style={{ width: pageW }}
             ref={(el) => {
               if (el) pageRefs.current.set(page.id, el);
             }}
           >
-            {/* Page header — inverse scaled to stay fixed size */}
-            <div
-              style={{
-                height: 32 * inverseScale,
-                marginBottom: 4 * inverseScale,
-              }}
-            >
             <div
               class="group/header flex items-center justify-between py-1.5"
-              style={{
-                transform: `scale(${inverseScale})`,
-                transformOrigin: "left top",
-                width: canvasWidth * zoom,
-                height: 32,
-              }}
+              style={{ width: pageW, height: 32 }}
             >
-              {/* Title — click to rename */}
               <div class="flex items-center gap-1.5">
                 {renamingId === page.id ? (
                   <input
                     ref={renameRef}
-                    class="text-[11px] text-zinc-700 bg-white border border-[#6366f1] rounded px-1.5 py-0.5 outline-none font-medium"
+                    class="text-[11px] text-fg-secondary bg-surface-card border border-accent rounded px-1.5 py-0.5 outline-none font-medium"
                     style={{ width: 140 }}
                     value={renameValue}
                     onInput={(e) => setRenameValue((e.target as HTMLInputElement).value)}
@@ -259,7 +270,7 @@ export function CanvasArea() {
                   />
                 ) : (
                   <span
-                    class="text-[11px] text-zinc-400 font-medium cursor-pointer hover:text-zinc-600 transition-colors"
+                    class="text-[11px] text-fg-muted font-medium cursor-pointer hover:text-fg-secondary transition-colors"
                     onClick={() => startRename(page.id, page.title)}
                   >
                     {page.title}
@@ -267,17 +278,16 @@ export function CanvasArea() {
                 )}
               </div>
 
-              {/* Action icons — visible on hover */}
               <div class="flex items-center gap-0.5">
                 <button
-                  class="p-1 rounded bg-transparent border-none cursor-pointer text-zinc-400 hover:text-[#6366f1] hover:bg-[#6366f1]/10 transition-all"
+                  class="p-1 rounded bg-transparent border-none cursor-pointer text-fg-muted hover:text-accent hover:bg-accent/10 transition-all"
                   onClick={() => addPage(page.id)}
                   title="Add page below"
                 >
                   <Plus size={14} />
                 </button>
                 <button
-                  class="p-1 rounded bg-transparent border-none cursor-pointer text-zinc-400 hover:text-[#6366f1] hover:bg-[#6366f1]/10 transition-all"
+                  class="p-1 rounded bg-transparent border-none cursor-pointer text-fg-muted hover:text-accent hover:bg-accent/10 transition-all"
                   onClick={() => duplicatePage(page.id)}
                   title="Duplicate page"
                 >
@@ -285,7 +295,7 @@ export function CanvasArea() {
                 </button>
                 {pages.length > 1 && (
                   <button
-                    class="p-1 rounded bg-transparent border-none cursor-pointer text-zinc-400 hover:text-red-500 hover:bg-red-500/10 transition-all"
+                    class="p-1 rounded bg-transparent border-none cursor-pointer text-fg-muted hover:text-red-500 hover:bg-red-500/10 transition-all"
                     onClick={() => deletePage(page.id)}
                     title="Delete page"
                   >
@@ -294,56 +304,53 @@ export function CanvasArea() {
                 )}
               </div>
             </div>
-            </div>
 
-            {/* Canvas */}
-            <div class="relative" style={{ width: canvasWidth, height: canvasHeight }}>
-              <PageCanvas
-                page={page}
-                isActive={page.id === activePageId}
-                width={canvasWidth}
-                height={canvasHeight}
-                onActivate={() => setActiveCanvas(page.id)}
-              />
-              {dropHint?.pageId === page.id && (
-                <div
-                  class="absolute pointer-events-none z-10 rounded-md"
-                  style={{
-                    left: dropHint.left,
-                    top: dropHint.top,
-                    width: dropHint.width,
-                    height: dropHint.height,
-                    boxShadow: "inset 0 0 0 2px #6366f1, 0 0 0 2px #6366f1",
-                  }}
-                >
-                  <span class="absolute left-1/2 top-2 -translate-x-1/2 px-2 py-0.5 rounded-full bg-[#6366f1] text-white text-[10px] font-semibold tracking-wide shadow-sm whitespace-nowrap">
-                    Replace
-                  </span>
-                </div>
-              )}
+            <div class="relative overflow-hidden" style={{ width: pageW, height: pageH }}>
+              <div
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  width: canvasWidth,
+                  height: canvasHeight,
+                  transform: `scale(${zoom})`,
+                  transformOrigin: "top left",
+                }}
+              >
+                <PageCanvas
+                  page={page}
+                  isActive={page.id === activePageId}
+                  width={canvasWidth}
+                  height={canvasHeight}
+                />
+                {dropHint?.pageId === page.id && (
+                  <div
+                    class="absolute pointer-events-none z-10 rounded-md"
+                    style={{
+                      left: dropHint.left,
+                      top: dropHint.top,
+                      width: dropHint.width,
+                      height: dropHint.height,
+                      boxShadow: "inset 0 0 0 2px #6366f1, 0 0 0 2px #6366f1",
+                    }}
+                  >
+                    <span class="absolute left-1/2 top-2 -translate-x-1/2 px-2 py-0.5 rounded-full bg-accent text-white text-[10px] font-semibold tracking-wide shadow-sm whitespace-nowrap">
+                      Replace
+                    </span>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         ))}
 
-        {/* Add page button — inverse scaled */}
-        <div style={{ height: 40 * inverseScale }}>
-          <div
-            style={{
-              transform: `scale(${inverseScale})`,
-              transformOrigin: "center top",
-              height: 40,
-            }}
-          >
-            <button
-              class="flex items-center gap-1.5 px-4 py-2 rounded-lg border-2 border-dashed border-zinc-300 bg-transparent cursor-pointer text-xs text-zinc-400 font-medium transition-all hover:border-[#6366f1] hover:text-[#6366f1] hover:bg-[#6366f1]/5"
-              onClick={() => addPage()}
-            >
-              <Plus size={14} />
-              Add page
-            </button>
-          </div>
-        </div>
-      </div>
+        <button
+          class="flex items-center gap-1.5 px-4 py-2 rounded-lg border-2 border-dashed border-border-mid bg-transparent cursor-pointer text-xs text-fg-muted font-medium transition-all hover:border-accent hover:text-accent hover:bg-accent/5"
+          onClick={() => addPage()}
+        >
+          <Plus size={14} />
+          Add page
+        </button>
       </div>
     </div>
   );

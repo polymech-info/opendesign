@@ -2,16 +2,19 @@ import * as fabric from "fabric";
 import { applyIconFill, applyIconStroke, isIconObject } from "./tabler-icons";
 import { applyRectCornerRadius, readCornerRadius, traceRoundRectXY } from "./image-radius";
 
-export type StylePresetId = "none" | "glass" | "grade" | "multiply" | "screen";
+export type StylePresetId = "none" | "glass" | "border" | "grade" | "multiply" | "screen";
+export type BorderKind = "line" | "rim";
 
 export const STYLE_PRESETS: { id: StylePresetId; label: string }[] = [
   { id: "none", label: "None" },
   { id: "glass", label: "Glass" },
+  { id: "border", label: "Border" },
 ];
 
 export const IMAGE_STYLE_PRESETS: { id: StylePresetId; label: string; swatch?: string }[] = [
   { id: "none", label: "None" },
   { id: "glass", label: "Glass" },
+  { id: "border", label: "Border" },
   {
     id: "grade",
     label: "Grade",
@@ -30,7 +33,7 @@ export const IMAGE_STYLE_PRESETS: { id: StylePresetId; label: string; swatch?: s
 ];
 
 const IMAGE_BLEND: Record<
-  Exclude<StylePresetId, "none" | "glass">,
+  Exclude<StylePresetId, "none" | "glass" | "border">,
   { css: string; blend: GlobalCompositeOperation; opacity: number }
 > = {
   grade: {
@@ -50,7 +53,7 @@ const IMAGE_BLEND: Record<
   },
 };
 
-const STYLE_IDS = new Set<StylePresetId>(["none", "glass", "grade", "multiply", "screen"]);
+const STYLE_IDS = new Set<StylePresetId>(["none", "glass", "border", "grade", "multiply", "screen"]);
 
 const GLASS = {
   blurPx: 20,
@@ -77,6 +80,7 @@ export type GlassOptions = {
   bloom: number;
   bloomOpacity: number;
   flares: number;
+  opacity: number;
 };
 
 export const DEFAULT_GLASS_OPTIONS: GlassOptions = {
@@ -88,6 +92,21 @@ export const DEFAULT_GLASS_OPTIONS: GlassOptions = {
   bloom: GLASS.glowBlurPx,
   bloomOpacity: GLASS.bloomOpacity,
   flares: GLASS.flares,
+  opacity: 1,
+};
+
+export type BorderOptions = {
+  kind: BorderKind;
+  width: number;
+  opacity: number;
+  color: string;
+};
+
+export const DEFAULT_BORDER_OPTIONS: BorderOptions = {
+  kind: "line",
+  width: 1.5,
+  opacity: 1,
+  color: "#ffffff",
 };
 
 function hexToRgba(hex: string, opacity: number) {
@@ -115,11 +134,21 @@ type StyledObject = fabric.FabricObject & {
   _stylePreset?: StylePresetId;
   _stylePresetBackup?: StyleBackup;
   _glassOptions?: Partial<GlassOptions>;
+  _borderOptions?: Partial<BorderOptions>;
   _glassDrawInstalled?: boolean;
   _origRender?: (ctx: CanvasRenderingContext2D) => void;
   rx?: number;
   ry?: number;
 };
+
+function clamp01(n: number) {
+  if (!Number.isFinite(n)) return 1;
+  return Math.min(1, Math.max(0, n));
+}
+
+export function usesOverlayPreset(preset: StylePresetId) {
+  return preset === "glass" || preset === "border";
+}
 
 type BackdropEntry = {
   canvas: HTMLCanvasElement;
@@ -208,6 +237,7 @@ export function readGlassOptions(obj: fabric.FabricObject): GlassOptions {
 
 export function applyGlassOptions(obj: fabric.FabricObject, partial: Partial<GlassOptions>) {
   const merged = { ...readGlassOptions(obj), ...partial };
+  merged.opacity = clamp01(merged.opacity);
   (obj as StyledObject)._glassOptions = merged;
   // Tint is an overlay for the glass draw pass. Only push it into fill when the
   // caller is actually editing tint — never when just enabling glass.
@@ -217,6 +247,28 @@ export function applyGlassOptions(obj: fabric.FabricObject, partial: Partial<Gla
   ) {
     obj.set({ fill: hexToRgba(merged.tint, merged.tintOpacity) });
   }
+  obj.dirty = true;
+}
+
+export function readBorderOptions(obj: fabric.FabricObject): BorderOptions {
+  const stored = (obj as StyledObject)._borderOptions;
+  const kind = stored?.kind === "rim" ? "rim" : "line";
+  return {
+    ...DEFAULT_BORDER_OPTIONS,
+    ...stored,
+    kind,
+    width: Math.max(0, stored?.width ?? DEFAULT_BORDER_OPTIONS.width),
+    opacity: clamp01(stored?.opacity ?? DEFAULT_BORDER_OPTIONS.opacity),
+    color: stored?.color || DEFAULT_BORDER_OPTIONS.color,
+  };
+}
+
+export function applyBorderOptions(obj: fabric.FabricObject, partial: Partial<BorderOptions>) {
+  const merged = { ...readBorderOptions(obj), ...partial };
+  if (merged.kind !== "rim") merged.kind = "line";
+  merged.width = Math.max(0, merged.width);
+  merged.opacity = clamp01(merged.opacity);
+  (obj as StyledObject)._borderOptions = merged;
   obj.dirty = true;
 }
 
@@ -406,8 +458,11 @@ function drawBloom(ctx: CanvasRenderingContext2D, obj: fabric.FabricObject) {
   });
 }
 
-function drawRim(ctx: CanvasRenderingContext2D, obj: fabric.FabricObject) {
-  const rimW = readGlassOptions(obj).rim;
+function drawRim(
+  ctx: CanvasRenderingContext2D,
+  obj: fabric.FabricObject,
+  rimW = readGlassOptions(obj).rim
+) {
   if (rimW <= 0) return;
 
   withUniformSpace(ctx, obj, (pw, ph, radius) => {
@@ -491,6 +546,27 @@ function drawFlares(ctx: CanvasRenderingContext2D, obj: fabric.FabricObject) {
   });
 }
 
+function drawLineBorder(ctx: CanvasRenderingContext2D, obj: fabric.FabricObject, opts: BorderOptions) {
+  if (opts.width <= 0 || opts.opacity <= 0) return;
+  withUniformSpace(ctx, obj, (pw, ph, radius) => {
+    ctx.beginPath();
+    traceUniformRoundRect(ctx, obj, pw, ph, radius, 0);
+    ctx.lineWidth = opts.width;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.strokeStyle = hexToRgba(opts.color, 1);
+    ctx.stroke();
+  });
+}
+
+function drawBorderOverlay(ctx: CanvasRenderingContext2D, obj: fabric.FabricObject) {
+  const opts = readBorderOptions(obj);
+  if (opts.opacity <= 0) return;
+  ctx.globalAlpha *= opts.opacity;
+  if (opts.kind === "rim") drawRim(ctx, obj, opts.width);
+  else drawLineBorder(ctx, obj, opts);
+}
+
 function paintLocalGradient(
   ctx: CanvasRenderingContext2D,
   css: string,
@@ -551,6 +627,15 @@ function installGlassDraw(obj: fabric.FabricObject) {
       orig.call(this, ctx);
       return;
     }
+    if (preset === "border") {
+      orig.call(this, ctx);
+      ctx.save();
+      this.transform(ctx);
+      this._setOpacity(ctx);
+      drawBorderOverlay(ctx, this);
+      ctx.restore();
+      return;
+    }
     if (preset !== "glass") {
       orig.call(this, ctx);
       const blend = IMAGE_BLEND[preset as keyof typeof IMAGE_BLEND];
@@ -564,15 +649,21 @@ function installGlassDraw(obj: fabric.FabricObject) {
       return;
     }
     const isImage = this instanceof fabric.FabricImage;
+    const glassAlpha = clamp01(readGlassOptions(this).opacity);
     ctx.save();
     this.transform(ctx);
     this._setOpacity(ctx);
+    ctx.globalAlpha *= glassAlpha;
     if (!isImage) drawBackdrop(ctx, this);
     ctx.restore();
+    ctx.save();
+    ctx.globalAlpha *= glassAlpha;
     orig.call(this, ctx);
+    ctx.restore();
     ctx.save();
     this.transform(ctx);
     this._setOpacity(ctx);
+    ctx.globalAlpha *= glassAlpha;
     if (!isImage) drawSurface(ctx, this);
     drawBloom(ctx, this);
     drawRim(ctx, this);
@@ -581,34 +672,76 @@ function installGlassDraw(obj: fabric.FabricObject) {
   };
 }
 
+function takeOverlayBackup(obj: fabric.FabricObject) {
+  const styled = obj as StyledObject;
+  if (styled._stylePresetBackup) return;
+  styled._stylePresetBackup = {
+    fill: obj.fill,
+    stroke: obj.stroke,
+    strokeWidth: obj.strokeWidth || 0,
+    shadow: obj.shadow ?? null,
+    objectCaching: obj.objectCaching,
+    rx: obj instanceof fabric.Rect ? obj.rx : undefined,
+    ry: obj instanceof fabric.Rect ? obj.ry : undefined,
+  };
+}
+
+function restoreOverlayBackup(obj: fabric.FabricObject) {
+  const styled = obj as StyledObject;
+  const backup = styled._stylePresetBackup;
+  styled._stylePreset = "none";
+  if (backup) {
+    obj.set({
+      fill: backup.fill as fabric.FabricObject["fill"],
+      stroke: backup.stroke as fabric.FabricObject["stroke"],
+      strokeWidth: backup.strokeWidth,
+      shadow: backup.shadow as fabric.FabricObject["shadow"],
+      objectCaching: backup.objectCaching,
+    });
+    if (obj instanceof fabric.Rect) {
+      const stored = (obj as { _cornerRadius?: number })._cornerRadius;
+      if (typeof stored === "number") applyRectCornerRadius(obj, stored);
+      else if (backup.rx != null) obj.set({ rx: backup.rx, ry: backup.ry ?? backup.rx });
+    }
+    if (isIconObject(obj)) {
+      if (typeof backup.fill === "string") applyIconFill(obj, backup.fill);
+      applyIconStroke(obj, backup.stroke, backup.strokeWidth);
+    }
+  }
+  styled._stylePresetBackup = undefined;
+}
+
+function seedBorderOptions(obj: fabric.FabricObject) {
+  if ((obj as StyledObject)._borderOptions) return;
+  const stroke = typeof obj.stroke === "string" ? obj.stroke : "";
+  const hex = stroke.startsWith("#") && stroke.length >= 7 ? stroke.slice(0, 7) : DEFAULT_BORDER_OPTIONS.color;
+  const width = obj.strokeWidth && obj.strokeWidth > 0 ? obj.strokeWidth : DEFAULT_BORDER_OPTIONS.width;
+  (obj as StyledObject)._borderOptions = { ...DEFAULT_BORDER_OPTIONS, color: hex, width };
+}
+
 export function applyStylePreset(obj: fabric.FabricObject, preset: StylePresetId) {
   const styled = obj as StyledObject;
   if (!STYLE_IDS.has(preset)) preset = "none";
   installGlassDraw(obj);
   invalidateGlassBackdrop(obj.canvas);
 
+  const prev = readStylePreset(obj);
+  if (prev !== preset && usesOverlayPreset(prev)) {
+    restoreOverlayBackup(obj);
+  }
+
   if (preset === "none") {
-    const backup = styled._stylePresetBackup;
-    styled._stylePreset = "none";
-    if (backup) {
-      obj.set({
-        fill: backup.fill as fabric.FabricObject["fill"],
-        stroke: backup.stroke as fabric.FabricObject["stroke"],
-        strokeWidth: backup.strokeWidth,
-        shadow: backup.shadow as fabric.FabricObject["shadow"],
-        objectCaching: backup.objectCaching,
-      });
-      if (obj instanceof fabric.Rect) {
-        const stored = (obj as { _cornerRadius?: number })._cornerRadius;
-        if (typeof stored === "number") applyRectCornerRadius(obj, stored);
-        else if (backup.rx != null) obj.set({ rx: backup.rx, ry: backup.ry ?? backup.rx });
-      }
-      if (isIconObject(obj)) {
-        if (typeof backup.fill === "string") applyIconFill(obj, backup.fill);
-        applyIconStroke(obj, backup.stroke, backup.strokeWidth);
-      }
-    }
-    styled._stylePresetBackup = undefined;
+    restoreOverlayBackup(obj);
+    obj.dirty = true;
+    return;
+  }
+
+  if (preset === "border") {
+    takeOverlayBackup(obj);
+    seedBorderOptions(obj);
+    styled._stylePreset = "border";
+    obj.set({ stroke: "", strokeWidth: 0, objectCaching: false });
+    if (isIconObject(obj)) applyIconStroke(obj, "", 0);
     obj.dirty = true;
     return;
   }
@@ -620,18 +753,7 @@ export function applyStylePreset(obj: fabric.FabricObject, preset: StylePresetId
     return;
   }
 
-  if (styled._stylePreset !== "glass") {
-    styled._stylePresetBackup = {
-      fill: obj.fill,
-      stroke: obj.stroke,
-      strokeWidth: obj.strokeWidth || 0,
-      shadow: obj.shadow ?? null,
-      objectCaching: obj.objectCaching,
-      rx: obj instanceof fabric.Rect ? obj.rx : undefined,
-      ry: obj instanceof fabric.Rect ? obj.ry : undefined,
-    };
-  }
-
+  takeOverlayBackup(obj);
   styled._stylePreset = "glass";
   if (!(obj as StyledObject)._glassOptions) {
     (obj as StyledObject)._glassOptions = { ...DEFAULT_GLASS_OPTIONS };

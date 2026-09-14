@@ -1,19 +1,56 @@
+import { createContext } from "preact";
+import { useContext, useEffect, useLayoutEffect } from "preact/hooks";
+import { Outlet, useLocation, useParams } from "@tanstack/react-router";
+import WebFont from "webfontloader";
 import { EditorContext } from "./context";
 import { useCanvasState } from "./hooks/use-canvas";
 import { useDesigns } from "./hooks/use-designs";
-import { useRouter } from "./hooks/use-router";
+import { useAppNavigate } from "./hooks/use-app-navigate";
+import {
+  DEFAULT_EDITOR_PANEL,
+  designIdFromPath,
+  editorHref,
+  exportIdFromPath,
+} from "./lib/editor-path";
 import { Editor } from "./components/editor";
 import { HeadlessExport } from "./components/headless-export";
 import { Home } from "./components/home";
-import WebFont from "webfontloader";
-import { useEffect, useLayoutEffect } from "preact/hooks";
 import { documentFromCanvasJson } from "../design/project";
 import { setActiveDocument } from "../design/tools";
 
-export function App() {
-  const { navigate, designId, exportDesignId } = useRouter();
+type CanvasState = ReturnType<typeof useCanvasState>;
+type DesignState = ReturnType<typeof useDesigns>;
+
+interface SessionValue {
+  canvasState: CanvasState;
+  designState: DesignState;
+  navigate: (to: string) => void;
+}
+
+const SessionContext = createContext<SessionValue>(null!);
+
+function useSession() {
+  return useContext(SessionContext);
+}
+
+function LoadingScreen() {
+  return (
+    <div class="flex items-center justify-center h-full bg-surface">
+      <div class="text-center">
+        <div class="spinner !w-6 !h-6 !border-accent/30 !border-t-accent mb-3 mx-auto" />
+        <p class="text-fg-muted text-sm">Loading...</p>
+      </div>
+    </div>
+  );
+}
+
+export function AppShell() {
+  const navigate = useAppNavigate();
+  const pathname = useLocation({ select: (l) => l.pathname });
   const canvasState = useCanvasState();
   const designState = useDesigns(canvasState.getCanvasJSONForPage);
+  const exportDesignId = exportIdFromPath(pathname);
+  const designId = exportDesignId ? null : designIdFromPath(pathname);
 
   useEffect(() => {
     if (exportDesignId) return;
@@ -51,8 +88,6 @@ export function App() {
     }
     const raw = designState.activePage?.canvas_json || designState.activeDesign?.canvas_json;
     setActiveDocument(documentFromCanvasJson(raw));
-    // Only rehydrate IR when the open design/page changes — not after save
-    // rewrites canvas_json, which would clobber in-memory style updates.
   }, [designId, designState.activeDesign?.id, designState.activePage?.id]);
 
   useLayoutEffect(() => {
@@ -77,33 +112,43 @@ export function App() {
     };
   }, [designId, designState.activeDesign?.name]);
 
-  if (exportDesignId) return <HeadlessExport designId={exportDesignId} />;
+  return (
+    <SessionContext.Provider value={{ canvasState, designState, navigate }}>
+      <Outlet />
+    </SessionContext.Provider>
+  );
+}
 
-  if (designState.loading || (designId && designState.activeDesign?.id !== designId)) {
-    return (
-      <div class="flex items-center justify-center h-full bg-[#F3F4F7]">
-        <div class="text-center">
-          <div class="spinner !w-6 !h-6 !border-accent/30 !border-t-accent mb-3 mx-auto" />
-          <p class="text-zinc-400 text-sm">Loading...</p>
-        </div>
-      </div>
-    );
-  }
+export function HomePage() {
+  const { designState, navigate } = useSession();
+  if (designState.loading) return <LoadingScreen />;
+  return (
+    <Home
+      designs={designState.designs}
+      templates={designState.templates}
+      navigate={navigate}
+      createDesign={designState.createDesign}
+      deleteDesign={designState.deleteDesign}
+      duplicateDesign={designState.duplicateDesign}
+      renameDesign={designState.renameDesign}
+      createFromTemplate={designState.createFromTemplate}
+      refreshThumbnails={designState.refreshThumbnails}
+    />
+  );
+}
 
-  if (!designId) {
-    return (
-      <Home
-        designs={designState.designs}
-        templates={designState.templates}
-        navigate={navigate}
-        createDesign={designState.createDesign}
-        deleteDesign={designState.deleteDesign}
-        duplicateDesign={designState.duplicateDesign}
-        renameDesign={designState.renameDesign}
-        createFromTemplate={designState.createFromTemplate}
-        refreshThumbnails={designState.refreshThumbnails}
-      />
-    );
+export function ExportPage() {
+  const { designId } = useParams({ strict: false });
+  return <HeadlessExport designId={designId as string} />;
+}
+
+export function EditorPage() {
+  const { canvasState, designState, navigate } = useSession();
+  const { designId } = useParams({ strict: false });
+  const waiting = designState.loading || designState.activeDesign?.id !== designId;
+
+  if (waiting && !designState.activeDesign) {
+    return <LoadingScreen />;
   }
 
   const contextValue = {
@@ -119,7 +164,14 @@ export function App() {
 
   return (
     <EditorContext.Provider value={contextValue}>
-      <Editor />
+      <div class="relative h-full">
+        <Editor key={designId} />
+        {waiting && (
+          <div class="absolute inset-0 z-50">
+            <LoadingScreen />
+          </div>
+        )}
+      </div>
     </EditorContext.Provider>
   );
 }

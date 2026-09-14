@@ -11,6 +11,7 @@ export const FABRIC_EXTRA_PROPS = [
   "_stylePreset",
   "_stylePresetBackup",
   "_glassOptions",
+  "_borderOptions",
   "_isIcon",
   "_iconName",
   "_iconUrl",

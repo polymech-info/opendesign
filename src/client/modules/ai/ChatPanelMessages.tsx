@@ -39,9 +39,9 @@ export function ChatMessages({ engine }: { engine: ChatEngineAPI }) {
 
   return (
     <div class="h-full w-full min-h-0 flex flex-col">
-      <div class="flex items-center gap-1.5 px-2 py-1.5 border-b border-zinc-100 shrink-0">
+      <div class="flex items-center gap-1.5 px-2 py-1.5 border-b border-border-dim shrink-0">
         <select
-          class="flex-1 min-w-0 text-[11px] px-1.5 py-1 rounded-md border border-zinc-200 bg-white text-zinc-600"
+          class="flex-1 min-w-0 text-[11px] px-1.5 py-1 rounded-md border border-border-dim bg-surface-card text-fg-secondary"
           value={engine.sessions.some((s) => s.id === engine.sessionId) ? engine.sessionId : ""}
           onChange={(e) => {
             const id = (e.target as HTMLSelectElement).value;
@@ -57,8 +57,8 @@ export function ChatMessages({ engine }: { engine: ChatEngineAPI }) {
         </select>
         <button
           type="button"
-          class={`h-7 w-7 shrink-0 rounded-md border border-zinc-200 bg-white cursor-pointer disabled:opacity-40 ${
-            transcriptCopied ? "text-emerald-600 border-emerald-200" : "text-zinc-500 hover:text-accent hover:border-accent"
+          class={`h-7 w-7 shrink-0 rounded-md border border-border-dim bg-surface-card cursor-pointer disabled:opacity-40 ${
+            transcriptCopied ? "text-emerald-600 border-emerald-200" : "text-fg-muted hover:text-accent hover:border-accent"
           }`}
           title={transcriptCopied ? "Copied!" : "Copy transcript (includes tool calls)"}
           disabled={!engine.messages.length}
@@ -68,14 +68,14 @@ export function ChatMessages({ engine }: { engine: ChatEngineAPI }) {
         </button>
         <button
           type="button"
-          class="h-7 w-7 shrink-0 rounded-md border border-zinc-200 bg-white text-zinc-500 hover:text-accent hover:border-accent cursor-pointer"
+          class="h-7 w-7 shrink-0 rounded-md border border-border-dim bg-surface-card text-fg-muted hover:text-accent hover:border-accent cursor-pointer"
           title="New chat"
           onClick={engine.handleNewSession}
         >
           <Plus size={14} />
         </button>
       </div>
-      <div class="px-2 pb-1.5 border-b border-zinc-100 shrink-0">
+      <div class="px-2 pb-1.5 border-b border-border-dim shrink-0">
         <ModelSelector
           models={engine.models}
           value={engine.model}
@@ -87,7 +87,7 @@ export function ChatMessages({ engine }: { engine: ChatEngineAPI }) {
 
       <div ref={scrollContainerRef} class="flex-1 min-h-0 overflow-y-auto px-2 py-2 space-y-2.5">
         {engine.messages.length === 0 ? (
-          <div class="flex flex-col items-center justify-center h-full text-zinc-400 gap-2 px-3">
+          <div class="flex flex-col items-center justify-center h-full text-fg-muted gap-2 px-3">
             <Bot size={28} class="opacity-30" />
             <p class="text-[12px] text-center m-0">Ask about this design</p>
             <p class="text-[10px] text-center m-0 opacity-70">

@@ -49,6 +49,7 @@ export function mergeOrder(roots: Roots): { layer: Layer; root: string }[] {
 const SUBDIRS = [
   "designs",
   "elements",
+  "styles",
   "templates",
   "uploads",
   "uploads/backgrounds",

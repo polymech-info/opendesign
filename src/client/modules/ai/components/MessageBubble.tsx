@@ -54,7 +54,7 @@ export function MessageBubble({ message, onCancel }: { message: ChatMessage; onC
     <div class={`flex gap-2 min-w-0 ${isUser ? "flex-row-reverse" : ""}`}>
       <div
         class={`shrink-0 w-6 h-6 rounded-full flex items-center justify-center ${
-          isUser ? "bg-accent text-white" : isTool ? "bg-amber-100 text-amber-700" : "bg-zinc-100 text-zinc-500"
+          isUser ? "bg-accent text-white" : isTool ? "bg-amber-100 text-amber-700" : "bg-surface-muted text-fg-muted"
         }`}
       >
         {isUser ? <User size={12} /> : isTool ? <Wrench size={12} /> : <Bot size={12} />}
@@ -66,7 +66,7 @@ export function MessageBubble({ message, onCancel }: { message: ChatMessage; onC
             ? "max-w-[90%] bg-accent text-white rounded-br-sm"
             : isTool
               ? "max-w-[95%] bg-amber-50 border border-amber-200 rounded-bl-sm"
-              : "max-w-[95%] bg-zinc-100 text-zinc-800 rounded-bl-sm"
+              : "max-w-[95%] bg-surface-muted text-fg rounded-bl-sm"
         }`}
       >
         {copyText ? (
@@ -74,7 +74,7 @@ export function MessageBubble({ message, onCancel }: { message: ChatMessage; onC
             type="button"
             onClick={handleCopy}
             class={`absolute top-1 right-1 p-0.5 rounded border-none cursor-pointer opacity-0 group-hover:opacity-100 ${
-              isUser ? "bg-white/15 text-white" : "bg-white text-zinc-500"
+              isUser ? "bg-white/15 text-white" : "bg-surface-card text-fg-muted"
             }`}
             title="Copy"
           >
@@ -111,7 +111,7 @@ export function MessageBubble({ message, onCancel }: { message: ChatMessage; onC
               <MarkdownRenderer content={unescapeMarkdown(message.content)} />
             )
           ) : (
-            <span class={`inline-flex items-center gap-1.5 ${isUser ? "text-white/80" : "text-zinc-400"}`}>
+            <span class={`inline-flex items-center gap-1.5 ${isUser ? "text-white/80" : "text-fg-muted"}`}>
               <Loader2 size={12} class="animate-spin" />
               Thinking…
               {onCancel ? (
@@ -134,7 +134,7 @@ export function MessageBubble({ message, onCancel }: { message: ChatMessage; onC
               <button
                 type="button"
                 onClick={onCancel}
-                class="inline-flex items-center gap-0.5 text-[10px] px-1 py-0.5 rounded border-none bg-transparent cursor-pointer text-zinc-400 hover:text-red-600"
+                class="inline-flex items-center gap-0.5 text-[10px] px-1 py-0.5 rounded border-none bg-transparent cursor-pointer text-fg-muted hover:text-red-600"
               >
                 <StopCircle size={10} /> Stop
               </button>

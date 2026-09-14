@@ -92,6 +92,33 @@ function hitChildAtPoint(group: fabric.Group, scene: fabric.Point): fabric.Fabri
   return null;
 }
 
+export function findSelectableAt(
+  canvas: fabric.Canvas,
+  x: number,
+  y: number
+): fabric.FabricObject | null {
+  const point = new fabric.Point(x, y);
+  const objects = canvas.getObjects();
+  for (let i = objects.length - 1; i >= 0; i--) {
+    const obj = objects[i];
+    if (!obj.visible || obj.evented === false || isBgImage(obj)) continue;
+    if (obj instanceof fabric.ActiveSelection) continue;
+    if (isElementGroup(obj)) {
+      if (obj.containsPoint(point) || hitChildAtPoint(obj, point)) return obj;
+      continue;
+    }
+    if (obj.containsPoint(point)) return obj;
+  }
+  return null;
+}
+
+export function pointNearActiveObject(canvas: fabric.Canvas, x: number, y: number, pad = 28) {
+  const active = canvas.getActiveObject();
+  if (!active || isBgImage(active)) return false;
+  const box = active.getBoundingRect();
+  return x >= box.left - pad && x <= box.left + box.width + pad && y >= box.top - pad && y <= box.top + box.height + pad;
+}
+
 export function findCroppableImageAt(
   canvas: fabric.Canvas,
   x: number,

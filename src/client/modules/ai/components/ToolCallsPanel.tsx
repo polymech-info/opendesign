@@ -47,7 +47,7 @@ export function ToolCallsPanel({ runs }: { runs: ToolRunRecord[] }) {
         {runs.map((run, i) => (
           <div
             key={`${run.name}-${i}`}
-            class="rounded-md border border-amber-200/60 bg-white/70 overflow-hidden"
+            class="rounded-md border border-amber-200/60 bg-surface-card/70 overflow-hidden"
           >
             <div
               class={`px-2 py-1 text-[10px] font-semibold font-mono border-b border-amber-100 ${
@@ -58,19 +58,19 @@ export function ToolCallsPanel({ runs }: { runs: ToolRunRecord[] }) {
             </div>
             <div class="px-2 pb-2 space-y-1.5">
               <div>
-                <div class="text-[9px] uppercase tracking-wide text-zinc-400 mt-1 mb-0.5">arguments</div>
-                <pre class="m-0 p-1.5 rounded bg-zinc-50 border border-zinc-100 text-[9px] leading-snug text-zinc-700 overflow-x-auto max-h-28 overflow-y-auto whitespace-pre-wrap break-all">
+                <div class="text-[9px] uppercase tracking-wide text-fg-muted mt-1 mb-0.5">arguments</div>
+                <pre class="m-0 p-1.5 rounded bg-surface-muted border border-border-dim text-[9px] leading-snug text-fg-secondary overflow-x-auto max-h-28 overflow-y-auto whitespace-pre-wrap break-all">
                   {formatJson(run.arguments)}
                 </pre>
               </div>
               <div>
-                <div class="text-[9px] uppercase tracking-wide text-zinc-400 mb-0.5">
+                <div class="text-[9px] uppercase tracking-wide text-fg-muted mb-0.5">
                   {resultPending(run.result) ? "running" : "result"}
                 </div>
                 <pre
                   class={`m-0 p-1.5 rounded border text-[9px] leading-snug overflow-x-auto max-h-36 overflow-y-auto whitespace-pre-wrap break-all ${
                     resultOk(run.result)
-                      ? "bg-zinc-50 border-zinc-100 text-zinc-700"
+                      ? "bg-surface-muted border-border-dim text-fg-secondary"
                       : "bg-red-50 border-red-100 text-red-800"
                   }`}
                 >

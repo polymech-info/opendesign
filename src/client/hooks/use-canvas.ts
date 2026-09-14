@@ -46,12 +46,15 @@ import {
   writeCopiedObjectsToClipboard,
 } from "../lib/copy-objects";
 import { installSnapGuides } from "../lib/snap-guides";
+import { installTextEditScrollLock } from "../lib/fabric-text-edit";
 import {
   applyImageCropTransfer,
   captureImageCropTransfer,
   findCroppableImageAt,
+  findSelectableAt,
   installImageCropGestures,
   isCroppableImage,
+  pointNearActiveObject,
   resetImageFrame,
 } from "../lib/image-crop";
 import { cssLinearToFabricGradient } from "../lib/fill-presets";
@@ -188,6 +191,7 @@ export function useCanvasState() {
   const [canRedo, setCanRedo] = useState(false);
   const isRestoringRef = useRef<Set<string>>(new Set());
   const nudgeDirtyRef = useRef(false);
+  const patchHistoryTimerRef = useRef(0);
 
   // Helper to get the active canvas
   const getActiveCanvas = useCallback((): fabric.Canvas | null => {
@@ -229,6 +233,24 @@ export function useCanvasState() {
     return doc ? attachDesignDocument(raw, doc) : raw;
   }, []);
 
+  const activateCanvas = useCallback((pageId: string) => {
+    const prevId = activeCanvasIdRef.current;
+    if (prevId === pageId) return false;
+    // Mark the new page active first so the previous canvas's selection:cleared
+    // does not wipe the object this click is about to select.
+    activeCanvasIdRef.current = pageId;
+    setActiveCanvasId(pageId);
+    if (prevId) {
+      const prevCanvas = canvasMapRef.current.get(prevId);
+      if (prevCanvas) {
+        prevCanvas.discardActiveObject();
+        prevCanvas.requestRenderAll();
+      }
+    }
+    updateUndoRedoState(pageId);
+    return true;
+  }, [updateUndoRedoState]);
+
   const saveHistory = useCallback((pageId: string) => {
     if (isRestoringRef.current.has(pageId)) return;
     const canvas = canvasMapRef.current.get(pageId);
@@ -239,7 +261,6 @@ export function useCanvasState() {
       hist = { entries: [], index: -1 };
       historyMapRef.current.set(pageId, hist);
     }
-    // Truncate forward history
     hist.entries = hist.entries.slice(0, hist.index + 1);
     hist.entries.push(json);
     if (hist.entries.length > MAX_HISTORY) {
@@ -249,6 +270,14 @@ export function useCanvasState() {
     }
     updateUndoRedoState(pageId);
   }, [canvasHistoryJSON, updateUndoRedoState]);
+
+  const saveHistorySoon = useCallback((pageId: string) => {
+    window.clearTimeout(patchHistoryTimerRef.current);
+    patchHistoryTimerRef.current = window.setTimeout(() => {
+      patchHistoryTimerRef.current = 0;
+      saveHistory(pageId);
+    }, 150);
+  }, [saveHistory]);
 
   const registerCanvas = useCallback((pageId: string, canvas: fabric.Canvas) => {
     canvasMapRef.current.set(pageId, canvas);
@@ -260,6 +289,30 @@ export function useCanvasState() {
       setElementGroupsCtrlPick(canvas, true);
     };
     canvas.upperCanvasEl.addEventListener("pointerdown", enableCtrlPickBeforeFindTarget, true);
+    const syncSelection = () => {
+      if (activeCanvasIdRef.current !== pageId) activateCanvas(pageId);
+      const active = canvas.getActiveObject();
+      const pick = pointerPickRef.current;
+      if (pick?.inner) {
+        setSelectedObject(pick.inner);
+      } else if (pick?.ctrl && isElementGroup(active)) {
+        const inner = innerTargetFromEvent(active, pick.subTargets);
+        setSelectedObject(inner ?? active);
+      } else if (active instanceof fabric.ActiveSelection) {
+        setSelectedObject(canvas.getActiveObjects()[0] ?? active);
+      } else {
+        setSelectedObject(active ?? null);
+      }
+      setSelectionEpoch((n) => n + 1);
+    };
+    canvas.upperCanvasEl.addEventListener(
+      "pointerdown",
+      () => {
+        activateCanvas(pageId);
+        queueMicrotask(syncSelection);
+      },
+      true
+    );
 
     // Ctrl/Cmd+click a child inside a group without starting a group drag.
     canvas.on("mouse:down:before", (opt) => {
@@ -282,23 +335,6 @@ export function useCanvasState() {
       const evt = opt.e as MouseEvent | undefined;
       if (evt?.button === 2) {
         abortCanvasTransform(canvas);
-        const target = opt.target && !isBgImage(opt.target) ? opt.target : null;
-        if (target) {
-          const selected = canvas.getActiveObjects();
-          if (!selected.includes(target) && canvas.getActiveObject() !== target) {
-            canvas.setActiveObject(target);
-            setSelectedObject(target);
-            setSelectionEpoch((n) => n + 1);
-          }
-        } else {
-          canvas.discardActiveObject();
-          setSelectedObject(null);
-          setSelectionEpoch((n) => n + 1);
-        }
-        canvas.requestRenderAll();
-        window.dispatchEvent(
-          new CustomEvent("opend-context-menu", { detail: { x: evt.clientX, y: evt.clientY } })
-        );
         return;
       }
       const pick = pointerPickRef.current;
@@ -319,22 +355,6 @@ export function useCanvasState() {
         canvas.setCursor("pointer");
       }
     });
-    const syncSelection = () => {
-      if (activeCanvasIdRef.current !== pageId) return;
-      const active = canvas.getActiveObject();
-      const pick = pointerPickRef.current;
-      if (pick?.inner) {
-        setSelectedObject(pick.inner);
-      } else if (pick?.ctrl && isElementGroup(active)) {
-        const inner = innerTargetFromEvent(active, pick.subTargets);
-        setSelectedObject(inner ?? active);
-      } else if (active instanceof fabric.ActiveSelection) {
-        setSelectedObject(canvas.getActiveObjects()[0] ?? active);
-      } else {
-        setSelectedObject(active ?? null);
-      }
-      setSelectionEpoch((n) => n + 1);
-    };
     canvas.on("selection:created", syncSelection);
     canvas.on("selection:updated", syncSelection);
     canvas.on("selection:cleared", () => {
@@ -345,6 +365,7 @@ export function useCanvasState() {
       }
     });
     installSnapGuides(canvas);
+    installTextEditScrollLock(canvas);
     installImageCropGestures(canvas, () => saveHistory(pageId));
 
     // History + layer events
@@ -394,7 +415,7 @@ export function useCanvasState() {
       historyMapRef.current.set(pageId, { entries: [json], index: 0 });
       updateUndoRedoState(pageId);
     }, 100);
-  }, [canvasHistoryJSON, saveHistory, updateUndoRedoState]);
+  }, [activateCanvas, canvasHistoryJSON, saveHistory, updateUndoRedoState]);
 
   const unregisterCanvas = useCallback((pageId: string) => {
     canvasMapRef.current.delete(pageId);
@@ -402,23 +423,47 @@ export function useCanvasState() {
   }, []);
 
   const setActiveCanvas = useCallback((pageId: string) => {
-    const prevId = activeCanvasIdRef.current;
-    if (prevId === pageId) return;
-
-    // Clear selection on previous canvas
-    if (prevId) {
-      const prevCanvas = canvasMapRef.current.get(prevId);
-      if (prevCanvas) {
-        prevCanvas.discardActiveObject();
-        prevCanvas.requestRenderAll();
-      }
+    const switched = activateCanvas(pageId);
+    if (!switched) return;
+    const nextCanvas = canvasMapRef.current.get(pageId);
+    const active = nextCanvas?.getActiveObject();
+    if (active instanceof fabric.ActiveSelection) {
+      setSelectedObject(nextCanvas.getActiveObjects()[0] ?? active);
+    } else {
+      setSelectedObject(active ?? null);
     }
+    setSelectionEpoch((n) => n + 1);
+  }, [activateCanvas]);
 
-    activeCanvasIdRef.current = pageId;
-    setActiveCanvasId(pageId);
-    setSelectedObject(null);
-    updateUndoRedoState(pageId);
-  }, [updateUndoRedoState]);
+  const openContextMenuAt = useCallback(
+    (at: { pageId?: string; left?: number; top?: number; clientX: number; clientY: number }) => {
+      if (at.pageId) setActiveCanvas(at.pageId);
+      const pageId = at.pageId || activeCanvasIdRef.current;
+      const canvas = pageId ? canvasMapRef.current.get(pageId) ?? null : getActiveCanvas();
+      if (canvas && at.left != null && at.top != null) {
+        abortCanvasTransform(canvas);
+        const hit = findSelectableAt(canvas, at.left, at.top);
+        const active = canvas.getActiveObject();
+        if (hit) {
+          const selected = canvas.getActiveObjects();
+          if (!selected.includes(hit) && active !== hit) {
+            canvas.setActiveObject(hit);
+            setSelectedObject(hit);
+            setSelectionEpoch((n) => n + 1);
+          }
+        } else if (!pointNearActiveObject(canvas, at.left, at.top)) {
+          canvas.discardActiveObject();
+          setSelectedObject(null);
+          setSelectionEpoch((n) => n + 1);
+        }
+        canvas.requestRenderAll();
+      }
+      window.dispatchEvent(
+        new CustomEvent("opend-context-menu", { detail: { x: at.clientX, y: at.clientY } })
+      );
+    },
+    [setActiveCanvas, getActiveCanvas]
+  );
 
   // ── Text ────────────────────────────────────────────────────────────
 
@@ -797,11 +842,11 @@ export function useCanvasState() {
         setSelectedObject(targets[0]);
       }
       canvas.requestRenderAll();
-      saveHistory(pageId);
+      saveHistorySoon(pageId);
       setSelectionEpoch((n) => n + 1);
       if ("_elementName" in props || "_id" in props || "visible" in props) setLayersEpoch((n) => n + 1);
     },
-    [getActiveCanvas, selectedObject, saveHistory]
+    [getActiveCanvas, selectedObject, saveHistorySoon]
   );
 
   const nudgeSelected = useCallback(
@@ -885,26 +930,34 @@ export function useCanvasState() {
     setHasCopiedStyle(true);
   }, [getActiveCanvas, selectedObject]);
 
+  const applyCopiedObjectStyle = useCallback(
+    (style: CopiedObjectStyle) => {
+      const canvas = getActiveCanvas();
+      const pageId = activeCanvasIdRef.current;
+      const targets = isInsideElementGroup(selectedObject)
+        ? selectedObject
+          ? [selectedObject]
+          : []
+        : selectedCanvasObjects(canvas, selectedObject);
+      if (!canvas || !pageId || targets.length === 0) return;
+      for (const obj of targets) {
+        applyObjectStyle(obj, style);
+        syncObjectStyleInIr(obj);
+        obj.setCoords();
+      }
+      canvas.requestRenderAll();
+      saveHistory(pageId);
+      setSelectedObject(targets[0]);
+      setSelectionEpoch((n) => n + 1);
+    },
+    [getActiveCanvas, selectedObject, saveHistory]
+  );
+
   const pasteSelectedStyle = useCallback(() => {
     const style = styleClipboardRef.current;
-    const canvas = getActiveCanvas();
-    const pageId = activeCanvasIdRef.current;
-    const targets = isInsideElementGroup(selectedObject)
-      ? selectedObject
-        ? [selectedObject]
-        : []
-      : selectedCanvasObjects(canvas, selectedObject);
-    if (!style || !canvas || !pageId || targets.length === 0) return;
-    for (const obj of targets) {
-      applyObjectStyle(obj, style);
-      syncObjectStyleInIr(obj);
-      obj.setCoords();
-    }
-    canvas.requestRenderAll();
-    saveHistory(pageId);
-    setSelectedObject(targets[0]);
-    setSelectionEpoch((n) => n + 1);
-  }, [getActiveCanvas, selectedObject, saveHistory]);
+    if (!style) return;
+    applyCopiedObjectStyle(style);
+  }, [applyCopiedObjectStyle]);
 
   const groupSelected = useCallback(() => {
     const canvas = getActiveCanvas();
@@ -1519,7 +1572,8 @@ export function useCanvasState() {
     if (
       el instanceof HTMLInputElement ||
       el instanceof HTMLTextAreaElement ||
-      (el instanceof HTMLElement && el.isContentEditable)
+      el instanceof HTMLSelectElement ||
+      (el instanceof HTMLElement && (el.isContentEditable || el.closest(".prop-slider")))
     ) {
       return true;
     }
@@ -1620,6 +1674,7 @@ export function useCanvasState() {
     registerCanvas,
     unregisterCanvas,
     setActiveCanvas,
+    openContextMenuAt,
     activeCanvasId,
     canvasMap: canvasMapRef,
     // For backward compat (right-sidebar uses canvas directly)
@@ -1651,6 +1706,7 @@ export function useCanvasState() {
     duplicateSelected,
     copySelectedStyle,
     pasteSelectedStyle,
+    applyCopiedObjectStyle,
     hasCopiedStyle,
     groupSelected,
     ungroupSelected,

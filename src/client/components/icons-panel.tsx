@@ -169,7 +169,7 @@ export function IconsPanel({ onPick, current, compact }: Props) {
           <button
             key={id}
             class={`flex-1 text-[10px] py-1 rounded-md border cursor-pointer ${
-              tab === id ? "border-accent bg-accent/10 text-zinc-800" : "border-zinc-200 bg-white text-zinc-500"
+              tab === id ? "border-accent bg-accent/10 text-fg" : "border-border-dim bg-surface-card text-fg-muted"
             }`}
             onClick={() => {
               setTab(id);
@@ -181,7 +181,7 @@ export function IconsPanel({ onPick, current, compact }: Props) {
         ))}
       </div>
       <input
-        class="w-full mb-2 bg-white border border-zinc-200 rounded-md text-xs text-zinc-700 px-2 py-1.5 outline-none focus:border-accent"
+        class="w-full mb-2 bg-surface-card border border-border-dim rounded-md text-xs text-fg-secondary px-2 py-1.5 outline-none focus:border-accent"
         placeholder={tab === "local" ? "Search local icons…" : "Search Iconify…"}
         value={query}
         onInput={(e) => {
@@ -189,10 +189,10 @@ export function IconsPanel({ onPick, current, compact }: Props) {
           setPage(0);
         }}
       />
-      <p class="text-[10px] text-zinc-400 mb-2 m-0">{status}</p>
+      <p class="text-[10px] text-fg-muted mb-2 m-0">{status}</p>
       {tab === "local" ? (
         localVisible.length === 0 ? (
-          <p class="text-zinc-400 text-[11px]">{names.length === 0 ? "Loading icons…" : "No icons found."}</p>
+          <p class="text-fg-muted text-[11px]">{names.length === 0 ? "Loading icons…" : "No icons found."}</p>
         ) : (
           <div class={`grid gap-1 ${compact ? "grid-cols-5" : "grid-cols-4"}`}>
             {localVisible.map((name) => (
@@ -201,7 +201,7 @@ export function IconsPanel({ onPick, current, compact }: Props) {
                 class={`aspect-square rounded-md border cursor-pointer p-1.5 ${
                   current === name
                     ? "border-accent bg-accent/10"
-                    : "border-zinc-200 bg-white hover:border-accent hover:bg-accent/5"
+                    : "border-border-dim bg-surface-card hover:border-accent hover:bg-accent/5"
                 }`}
                 title={name.replace(/-/g, " ")}
                 onClick={() => onPick({ source: "local", name })}
@@ -213,7 +213,7 @@ export function IconsPanel({ onPick, current, compact }: Props) {
         )
       ) : isSearch ? (
         remoteVisible.length === 0 ? (
-          <p class="text-zinc-400 text-[11px]">{loading ? "Searching…" : "No icons found."}</p>
+          <p class="text-fg-muted text-[11px]">{loading ? "Searching…" : "No icons found."}</p>
         ) : (
           <div class={`grid gap-1 ${compact ? "grid-cols-5" : "grid-cols-4"}`}>
             {remoteVisible.map((id) => {
@@ -224,7 +224,7 @@ export function IconsPanel({ onPick, current, compact }: Props) {
                 class={`aspect-square rounded-md border cursor-pointer p-1.5 ${
                   active
                     ? "border-accent bg-accent/10"
-                    : "border-zinc-200 bg-white hover:border-accent hover:bg-accent/5"
+                    : "border-border-dim bg-surface-card hover:border-accent hover:bg-accent/5"
                 }`}
                 title={`${id} — double-click to download`}
                 onClick={() => setHighlight(id)}
@@ -237,7 +237,7 @@ export function IconsPanel({ onPick, current, compact }: Props) {
           </div>
         )
       ) : savedVisible.length === 0 ? (
-        <p class="text-zinc-400 text-[11px]">Type at least two letters to search 200k+ icons.</p>
+        <p class="text-fg-muted text-[11px]">Type at least two letters to search 200k+ icons.</p>
       ) : (
         <div class={`grid gap-1 ${compact ? "grid-cols-5" : "grid-cols-4"}`}>
           {savedVisible.map((item) => (
@@ -246,7 +246,7 @@ export function IconsPanel({ onPick, current, compact }: Props) {
               class={`aspect-square rounded-md border cursor-pointer p-1.5 ${
                 current === item.id
                   ? "border-accent bg-accent/10"
-                  : "border-zinc-200 bg-white hover:border-accent hover:bg-accent/5"
+                  : "border-border-dim bg-surface-card hover:border-accent hover:bg-accent/5"
               }`}
               title={item.id}
               onClick={() => onPick({ source: "saved", name: item.id, url: item.url })}
@@ -259,17 +259,17 @@ export function IconsPanel({ onPick, current, compact }: Props) {
       {pageCount > 1 && (
         <div class="flex items-center justify-between mt-2">
           <button
-            class="p-1 rounded border border-zinc-200 bg-white cursor-pointer disabled:opacity-30"
+            class="p-1 rounded border border-border-dim bg-surface-card cursor-pointer disabled:opacity-30"
             disabled={safePage <= 0}
             onClick={() => setPage((p) => Math.max(0, p - 1))}
           >
             <ChevronLeft size={14} />
           </button>
-          <span class="text-[10px] text-zinc-400 font-mono">
+          <span class="text-[10px] text-fg-muted font-mono">
             {safePage + 1} / {pageCount}
           </span>
           <button
-            class="p-1 rounded border border-zinc-200 bg-white cursor-pointer disabled:opacity-30"
+            class="p-1 rounded border border-border-dim bg-surface-card cursor-pointer disabled:opacity-30"
             disabled={safePage >= pageCount - 1}
             onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
           >

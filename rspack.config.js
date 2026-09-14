@@ -27,6 +27,7 @@ export default (env = {}, argv = {}) => {
         react: "preact/compat",
         "react-dom": "preact/compat",
         "react/jsx-runtime": "preact/jsx-runtime",
+        "react/jsx-dev-runtime": "preact/jsx-runtime",
         "react-dom/test-utils": "preact/test-utils",
       },
       fallback: {
@@ -36,6 +37,13 @@ export default (env = {}, argv = {}) => {
       },
     },
     module: {
+      parser: {
+        javascript: {
+          // TanStack Router looks up React.use; Preact compat does not export it.
+          exportsPresence: false,
+          importExportsPresence: false,
+        },
+      },
       rules: [
         {
           test: /\.[jt]sx?$/,

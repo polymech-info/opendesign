@@ -19,7 +19,7 @@ export function ModelSelector({
 
   return (
     <select
-      class="w-full min-w-0 text-[11px] px-1.5 py-1 rounded-md border border-zinc-200 bg-white text-zinc-600"
+      class="w-full min-w-0 text-[11px] px-1.5 py-1 rounded-md border border-border-dim bg-surface-card text-fg-secondary"
       value={value}
       disabled={disabled || options.length === 0}
       title="Model"

@@ -19,6 +19,7 @@ const STYLE_KEYS = [
   "objectCaching",
   "_stylePreset",
   "_glassOptions",
+  "_borderOptions",
   "fontSize",
   "fontFamily",
   "fontWeight",

@@ -454,6 +454,41 @@ await suite("patch-projection", () => {
   );
   check(glassBg?._stylePreset === "glass", "glass preset in fabric json");
 
+  const border = dispatchDesignTool(
+    "design_update",
+    {
+      patches: [{
+        id: "feature.files.bg",
+        set: { border: "rim", borderOptions: { width: 2.5, opacity: 0.6 } },
+      }],
+    },
+    doc,
+  ) as { warnings?: unknown[]; ok?: boolean };
+  check(border.ok && !border.warnings?.length, "border is projectable on shapes");
+  const borderBg = JSON.parse(projectToFabricJSON(doc)).objects.find(
+    (o: { _id?: string; _stylePreset?: string; _borderOptions?: { kind?: string; width?: number }; stroke?: string }) =>
+      o._id === "feature.files.bg",
+  );
+  check(borderBg?._stylePreset === "border", "border preset in fabric json");
+  check(borderBg?._borderOptions?.kind === "rim", "border=rim seeds rim kind");
+  check(borderBg?.stroke === "", "border projection clears native stroke");
+
+  const glassWins = dispatchDesignTool(
+    "design_update",
+    { patches: [{ id: "feature.files.bg", set: { glass: true, border: true } }] },
+    doc,
+  ) as { ok?: boolean };
+  check(glassWins.ok, "glass+border patch ok");
+  const bothBg = JSON.parse(projectToFabricJSON(doc)).objects.find(
+    (o: { _id?: string; _stylePreset?: string }) => o._id === "feature.files.bg",
+  );
+  check(bothBg?._stylePreset === "glass", "glass wins when both overlays are set");
+  dispatchDesignTool(
+    "design_update",
+    { patches: [{ id: "feature.files.bg", set: { glass: false, border: false } }] },
+    doc,
+  );
+
   dispatchDesignTool(
     "design_update",
     { patches: [{ id: "feature.chat.title", set: { shadow: { x: 0, y: 2, blur: 8, color: "#0f172a30" } } }] },
