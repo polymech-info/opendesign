@@ -1,6 +1,45 @@
 # OpenDesign change log
 
+## 2026-09-22
+
+### Properties open with General, Transformation, Reset
+
+- The right panel now starts with identity (name, id, visible), then Transformation.
+- Visible is an eye toggle on the Id row, not a full-width Shown/Hidden button.
+- Reset (rotation, skew, image crop) is the first row in Transformation.
+- Text, Shape/Icon, and Image sit after that; Effects stay last.
+
+### Left rail shows upload palettes again
+
+- Images and Background in the left sidebar are a thumbnail grid again (click to place or apply).
+- The modal image picker stays on the properties panel, where a one-off replace makes sense.
+
+### Reset rotation and skew
+
+- Transformation now has Rotation / Skew sliders for shapes, text, and images.
+- Each row has a reset icon; the canvas menu has the same Reset rotation and Reset skew actions.
+
+### Glass glare and sparks sit in different spots
+
+- Each glass object gets its own sheen tilt and edge sparks, from a stored seed.
+- The Flares row has a shuffle control to pick a new location.
+
+### Font / size restyles the whole text box
+
+- Changing font, size, weight, or color from the properties panel now applies to every line.
+- Leftover Fabric per-row styles (from wrapping or pasting) no longer pin some bullets at the old size.
+
+### tanit-cli starts only when chat needs it
+
+- Opening the editor no longer launches `tanit-cli llm agent --serve`.
+- The first chat (or `pm-opendesign prompt`) starts it, and later messages reuse it.
+
 ## 2026-09-14
+
+### Chat starts the LLM again if it died
+
+- Sending a chat message respawns `tanit-cli llm agent --serve` when it is down (port 8090 bind failure used to stick as a 502).
+- If 8090 is taken, OpenDesign tries 8091–8099 instead of giving up.
 
 ### Left rail stays on Designs when switching
 

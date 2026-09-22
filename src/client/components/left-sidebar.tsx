@@ -236,7 +236,7 @@ export function LeftSidebar() {
 
                 {activeSection === "images" && (
                   <div>
-                    <p class="text-fg-muted text-[11px] mb-2">Stored in uploads/ — choose an image to place, or drop files in the picker</p>
+                    <p class="text-fg-muted text-[11px] mb-2">Stored in uploads/ — click a thumbnail to place, or drop files here</p>
                     <MediaLibrary kind="images" onPick={addImage} />
                   </div>
                 )}
@@ -277,7 +277,7 @@ export function LeftSidebar() {
                     </div>
 
                     <p class="text-fg-muted text-[11px] mb-2">Background images</p>
-                    <p class="text-fg-muted text-[10px] mb-2">Stored in uploads/backgrounds/ — choose or drop an image in the picker</p>
+                    <p class="text-fg-muted text-[10px] mb-2">Stored in uploads/backgrounds/ — click a thumbnail to apply, or drop files here</p>
                     <MediaLibrary kind="backgrounds" currentUrl={pagePhotoSrc(canvas)} onPick={(url) => setBackground("image", url)} />
                   </div>
                 )}

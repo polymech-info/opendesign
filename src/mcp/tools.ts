@@ -10,7 +10,7 @@ import {
   searchIcons,
   serializeDsl,
 } from "../design/index.js";
-import type { LlmTarget } from "../server/llm.js";
+import { ensureLiveLlm, type LlmTarget } from "../server/llm.js";
 import * as store from "../server/store.js";
 import { exportDesignFile } from "./export.js";
 import {
@@ -386,7 +386,9 @@ const promptDesignTool: McpTool = {
           "LLM not configured. Start the editor (inherits tanit-cli --serve), set OPEND_LLM_URL, or run `tanit-cli --no-gui llm agent --serve`.",
       };
     }
-    const llm = ctx.llm ?? { url: "http://127.0.0.1:8090", key: "", cwd: mcpRoots(ctx.cwd).project };
+    const llm =
+      (await ensureLiveLlm(ctx.llm)) ??
+      { url: "http://127.0.0.1:8090", key: "", cwd: mcpRoots(ctx.cwd).project };
     try {
       const result = await runCliPrompt({
         cwd: ctx.cwd,

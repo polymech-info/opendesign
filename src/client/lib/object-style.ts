@@ -59,6 +59,53 @@ function isTextObject(obj: fabric.FabricObject) {
   return obj instanceof fabric.Textbox || obj instanceof fabric.IText;
 }
 
+const TEXT_CHAR_STYLE_KEYS = [
+  "fontSize",
+  "fontFamily",
+  "fontWeight",
+  "fontStyle",
+  "underline",
+  "overline",
+  "linethrough",
+  "fill",
+] as const;
+
+function pickTextCharStylePatch(props: Record<string, unknown>): Record<string, unknown> | null {
+  const patch: Record<string, unknown> = {};
+  for (const key of TEXT_CHAR_STYLE_KEYS) {
+    if (key in props) patch[key] = props[key];
+  }
+  return Object.keys(patch).length > 0 ? patch : null;
+}
+
+export type TextStyleHost = {
+  isEditing?: boolean;
+  selectionStart?: number;
+  selectionEnd?: number;
+  dirty?: boolean;
+  removeStyle: (property: string) => void;
+  setSelectionStyles: (styles: object, start: number, end: number) => void;
+};
+
+/** Drop leftover per-row Fabric styles, unless a live edit has a character range selected. */
+export function applyStyledTextPatch(text: TextStyleHost, patch: Record<string, unknown>) {
+  const start = text.selectionStart ?? 0;
+  const end = text.selectionEnd ?? 0;
+  if (text.isEditing && end > start) {
+    text.setSelectionStyles(patch, start, end);
+  } else {
+    for (const key of Object.keys(patch)) text.removeStyle(key);
+  }
+  text.dirty = true;
+}
+
+function applyTextStyleOverrides(obj: fabric.FabricObject, props: Record<string, unknown>) {
+  if (!isTextObject(obj)) return;
+  const patch = pickTextCharStylePatch(props);
+  if (!patch) return;
+  applyStyledTextPatch(obj as fabric.IText, patch);
+}
+
 function snapshotShadow(obj: fabric.FabricObject): CopiedShadow | null {
   const raw = obj.shadow;
   if (!raw) return null;
@@ -236,6 +283,7 @@ export function applyObjectStyle(obj: fabric.FabricObject, style: CopiedObjectSt
     if (style.lineHeight != null) next.lineHeight = style.lineHeight;
     if (style.charSpacing != null) next.charSpacing = style.charSpacing;
     obj.set(next);
+    applyTextStyleOverrides(obj, next);
   } else if (image) {
     const radius = style.cornerRadius ?? style.rx;
     if (typeof radius === "number") applyImageCornerRadius(obj, radius);
@@ -356,6 +404,7 @@ export function applyObjectPatch(obj: fabric.FabricObject, props: Record<string,
     next._id = value ? uniqueIfTaken(value, taken) : nextUnique(objectKindSlug(obj), taken);
   }
   obj.set(next as Partial<fabric.FabricObject>);
+  applyTextStyleOverrides(obj, next);
   if (usesOverlayPreset(readStylePreset(obj)) && ("fill" in props || "stroke" in props || "strokeWidth" in props)) {
     const styled = obj as fabric.FabricObject & {
       _stylePresetBackup?: {

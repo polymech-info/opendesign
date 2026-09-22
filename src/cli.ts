@@ -15,7 +15,7 @@ import { resolveRoots } from "./server/paths.js";
 import { mountClient } from "./server/serve-client.js";
 import { devPortFile } from "./server/dev-port.js";
 import { HOST_TOOL_PROVIDER_ID } from "./server/agent-tools.js";
-import { ensureLlmServer, registerHostToolProvider } from "./server/llm.js";
+import { deferLlmServer, ensureLlmServer } from "./server/llm.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const runningFromSource = path.basename(here) === "src";
@@ -251,7 +251,7 @@ const hostToolProvider = {
   id: HOST_TOOL_PROVIDER_ID,
   url: `http://127.0.0.1:${Number.isFinite(preferredPort) ? preferredPort : DEFAULT_API_PORT}/api/agent-tools`,
 };
-const llm = await ensureLlmServer({ cwd: roots.project, searchFrom: pkgRoot, hostToolProvider });
+const llm = deferLlmServer({ cwd: roots.project, searchFrom: pkgRoot, hostToolProvider });
 const app = createOpenDesignApp({ roots, iconDir, llm });
 
 if (!runningFromSource && fs.existsSync(clientDir)) {
@@ -260,10 +260,7 @@ if (!runningFromSource && fs.existsSync(clientDir)) {
 
 const { port } = await listenHono(app.fetch, preferredPort, { allowFallback: true });
 fs.writeFileSync(portFile, JSON.stringify({ api: port }) + "\n");
-await registerHostToolProvider(llm, {
-  id: HOST_TOOL_PROVIDER_ID,
-  url: `http://127.0.0.1:${port}/api/agent-tools`,
-});
+hostToolProvider.url = `http://127.0.0.1:${port}/api/agent-tools`;
 
 const uiPort = Number(process.env.OPEND_UI_PORT || DEFAULT_UI_PORT);
 const ui = runningFromSource ? `http://127.0.0.1:${uiPort}` : `http://127.0.0.1:${port}`;
@@ -273,7 +270,7 @@ console.log(`  Local:   ${ui}`);
 console.log(`  Project: ${roots.project}`);
 console.log(`  Global:  ${roots.global}`);
 console.log(`  Merge:   union — project shadows same id/key`);
-console.log(`  LLM:     ${llm.url}\n`);
+console.log(`  LLM:     on demand (${llm.url})\n`);
 
 const cleanup = () => {
   llm.stop();

@@ -25,6 +25,8 @@
     "test:background-image": "tsx tests/design/test-background-image.ts",
     "test:grouped-edit": "tsx tests/design/test-grouped-edit.ts",
     "test:editor-path": "tsx tests/design/test-editor-path.ts",
+    "test:llm-ensure": "tsx tests/design/test-llm-ensure.ts",
+    "test:glass-flares": "tsx tests/design/test-glass-flares.ts",
     "test:design": "tsx tests/design/test-design-dsl.ts",
     "test:agent-tools": "tsx tests/design/test-agent-tools.ts",
     "test:design:llm": "tsx tests/design/test-design-llm.ts",

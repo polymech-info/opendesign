@@ -18,6 +18,7 @@ import {
   Maximize2,
   Redo2,
   RotateCcw,
+  Square,
   Scissors,
   SendToBack,
   Trash2,
@@ -303,6 +304,21 @@ export function CanvasContextMenu({ pos, onClose }: { pos: MenuPos; onClose: () 
           label="Maximize"
           disabled={!hasSelection}
           onClick={() => run(maximizeSelected)}
+        />
+        <Item
+          icon={<RotateCcw size={12} />}
+          label="Reset rotation"
+          disabled={!hasSelection || objects.every((obj) => Math.abs(obj.angle || 0) < 0.01)}
+          onClick={() => run(() => updateSelectedObject({ angle: 0 }))}
+        />
+        <Item
+          icon={<Square size={12} />}
+          label="Reset skew"
+          disabled={
+            !hasSelection ||
+            objects.every((obj) => Math.abs(obj.skewX || 0) < 0.01 && Math.abs(obj.skewY || 0) < 0.01)
+          }
+          onClick={() => run(() => updateSelectedObject({ skewX: 0, skewY: 0 }))}
         />
         <Item
           icon={hidden ? <Eye size={12} /> : <EyeOff size={12} />}

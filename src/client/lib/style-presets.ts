@@ -81,7 +81,86 @@ export type GlassOptions = {
   bloomOpacity: number;
   flares: number;
   opacity: number;
+  /** Stable per-object glare / spark placement. */
+  flareSeed?: number;
 };
+
+export type GlassFlareSpot = {
+  x: number;
+  y: number;
+  scale: number;
+  color: string;
+  edge: number;
+};
+
+export function newGlassFlareSeed() {
+  return ((Math.random() * 0x7fffffff) | 1) >>> 0 || 1;
+}
+
+function mulberry32(seed: number) {
+  let a = seed >>> 0 || 1;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function hashFlareSeed(value: string) {
+  let h = 2166136261;
+  for (let i = 0; i < value.length; i++) {
+    h ^= value.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0) || 1;
+}
+
+export function resolveGlassFlareSeed(obj: fabric.FabricObject) {
+  const stored = (obj as { _glassOptions?: Partial<GlassOptions> })._glassOptions?.flareSeed;
+  if (typeof stored === "number" && Number.isFinite(stored) && stored !== 0) {
+    return stored >>> 0 || 1;
+  }
+  const id = String((obj as { _id?: string; _layerId?: string })._id || (obj as { _layerId?: string })._layerId || "");
+  return id ? hashFlareSeed(id) : 1;
+}
+
+function pointOnRectEdge(pw: number, ph: number, edge: number, t: number) {
+  const x0 = -pw / 2;
+  const y0 = -ph / 2;
+  const u = Math.min(1, Math.max(0, t));
+  switch (edge & 3) {
+    case 0:
+      return { x: x0 + pw * u, y: y0, edge: 0 };
+    case 1:
+      return { x: x0 + pw, y: y0 + ph * u, edge: 1 };
+    case 2:
+      return { x: x0 + pw * u, y: y0 + ph, edge: 2 };
+    default:
+      return { x: x0, y: y0 + ph * u, edge: 3 };
+  }
+}
+
+/** Two edge sparks from a seed. Same seed / size always lands in the same spots. */
+export function glassFlareLayout(seed: number, pw: number, ph: number, strength: number): GlassFlareSpot[] {
+  const rnd = mulberry32(seed >>> 0 || 1);
+  const specs = [
+    { scale: 1, color: `rgba(255,120,55,${0.8 * strength})` },
+    { scale: 0.7, color: `rgba(80,210,255,${0.55 * strength})` },
+  ];
+  const firstEdge = Math.floor(rnd() * 4);
+  return specs.map((spec, i) => {
+    const edge = i === 0 ? firstEdge : (firstEdge + 2 + (rnd() < 0.35 ? 1 : 0)) & 3;
+    const t = 0.1 + rnd() * 0.8;
+    return { ...pointOnRectEdge(pw, ph, edge, t), ...spec };
+  });
+}
+
+/** Sheen / glare tilt in radians from vertical, derived from the same seed. */
+export function glassSheenAngle(seed: number) {
+  const rnd = mulberry32((seed >>> 0 || 1) ^ 0x9e3779b9);
+  return (rnd() - 0.5) * 0.95;
+}
 
 export const DEFAULT_GLASS_OPTIONS: GlassOptions = {
   blur: GLASS.blurPx,
@@ -429,11 +508,14 @@ function drawSurface(ctx: CanvasRenderingContext2D, obj: fabric.FabricObject) {
   const w = obj.width || 0;
   const h = obj.height || 0;
   const sheen = readGlassOptions(obj).sheen;
+  const ang = glassSheenAngle(resolveGlassFlareSeed(obj));
   ctx.save();
   traceObjectShape(ctx, obj);
   ctx.closePath();
   ctx.clip();
-  const g = ctx.createLinearGradient(0, -h / 2, 0, h / 2);
+  const x = Math.sin(ang) * (h / 2);
+  const y = Math.cos(ang) * (h / 2);
+  const g = ctx.createLinearGradient(-x, -y, x, y);
   g.addColorStop(0.0, `rgba(255,255,255,${0.13 * sheen})`);
   g.addColorStop(0.15, `rgba(230,245,255,${0.055 * sheen})`);
   g.addColorStop(0.55, `rgba(150,190,230,${0.015 * sheen})`);
@@ -537,12 +619,12 @@ function drawEdgeFlare(
 function drawFlares(ctx: CanvasRenderingContext2D, obj: fabric.FabricObject) {
   const strength = readGlassOptions(obj).flares;
   if (strength <= 0) return;
+  const seed = resolveGlassFlareSeed(obj);
   withUniformSpace(ctx, obj, (pw, ph) => {
-    const x = -pw / 2;
-    const y = -ph / 2;
     const radius = GLASS.flareRadiusPx * strength;
-    drawEdgeFlare(ctx, obj, x, y + ph * 0.76, radius, `rgba(255,120,55,${0.8 * strength})`);
-    drawEdgeFlare(ctx, obj, x + pw, y + ph * 0.18, radius * 0.7, `rgba(80,210,255,${0.55 * strength})`);
+    for (const spot of glassFlareLayout(seed, pw, ph, strength)) {
+      drawEdgeFlare(ctx, obj, spot.x, spot.y, radius * spot.scale, spot.color);
+    }
   });
 }
 
@@ -756,7 +838,9 @@ export function applyStylePreset(obj: fabric.FabricObject, preset: StylePresetId
   takeOverlayBackup(obj);
   styled._stylePreset = "glass";
   if (!(obj as StyledObject)._glassOptions) {
-    (obj as StyledObject)._glassOptions = { ...DEFAULT_GLASS_OPTIONS };
+    (obj as StyledObject)._glassOptions = { ...DEFAULT_GLASS_OPTIONS, flareSeed: newGlassFlareSeed() };
+  } else if (!styled._glassOptions?.flareSeed) {
+    applyGlassOptions(obj, { flareSeed: newGlassFlareSeed() });
   }
   obj.set({ objectCaching: false });
   if (obj instanceof fabric.Rect) {

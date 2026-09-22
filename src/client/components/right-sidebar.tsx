@@ -15,6 +15,8 @@ import {
   BringToFront,
   SendToBack,
   RotateCcw,
+  Shuffle,
+  Square,
   AlignStartVertical,
   AlignEndVertical,
   AlignStartHorizontal,
@@ -32,7 +34,7 @@ import * as fabric from "fabric";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { useEditor } from "../context";
 import { readImageCornerRadius, readCornerRadius } from "../lib/image-radius";
-import { readStylePreset, readGlassOptions, readBorderOptions, STYLE_PRESETS, IMAGE_STYLE_PRESETS } from "../lib/style-presets";
+import { readStylePreset, readGlassOptions, readBorderOptions, newGlassFlareSeed, STYLE_PRESETS, IMAGE_STYLE_PRESETS } from "../lib/style-presets";
 import type { GlassOptions, BorderOptions, BorderKind } from "../lib/style-presets";
 import { isIconObject, readIconFill, readIconStroke, readIconStrokeWidth, iconPreviewUrl } from "../lib/tabler-icons";
 import { selectedCanvasObjects, captureObjectStyle, styleSwatchCss } from "../lib/object-style";
@@ -164,6 +166,99 @@ function FlipFields({
           <FlipVertical size={14} />
         </button>
       </div>
+    </div>
+  );
+}
+
+function nearZero(n: number) {
+  return Math.abs(n) < 0.01;
+}
+
+function ResetIconButton({
+  title,
+  disabled,
+  onClick,
+  children,
+}: {
+  title: string;
+  disabled: boolean;
+  onClick: () => void;
+  children: ComponentChildren;
+}) {
+  return (
+    <button
+      type="button"
+      class="p-1.5 rounded-md border border-border-mid bg-transparent text-fg-muted cursor-pointer hover:text-fg hover:border-accent disabled:opacity-30 disabled:cursor-not-allowed"
+      title={title}
+      disabled={disabled}
+      onClick={onClick}
+    >
+      {children}
+    </button>
+  );
+}
+
+function RotateSkewFields({
+  obj,
+  onChange,
+}: {
+  obj: fabric.FabricObject;
+  onChange: (props: Record<string, unknown>) => void;
+}) {
+  const angle = obj.angle || 0;
+  const skewX = obj.skewX || 0;
+  const skewY = obj.skewY || 0;
+  return (
+    <div class="flex flex-col gap-2">
+      <div class="flex items-center gap-1.5">
+        <div class="flex-1 min-w-0">
+          <PropSlider
+            label="Rotation"
+            value={angle}
+            min={-180}
+            max={180}
+            step={1}
+            suffix="°"
+            onChange={(next) => onChange({ angle: next })}
+          />
+        </div>
+        <ResetIconButton
+          title="Reset rotation"
+          disabled={nearZero(angle)}
+          onClick={() => onChange({ angle: 0 })}
+        >
+          <RotateCcw size={14} />
+        </ResetIconButton>
+      </div>
+      <div class="flex items-center gap-1.5">
+        <div class="flex-1 min-w-0">
+          <PropSlider
+            label="Skew X"
+            value={skewX}
+            min={-70}
+            max={70}
+            step={0.5}
+            suffix="°"
+            onChange={(next) => onChange({ skewX: next })}
+          />
+        </div>
+        <ResetIconButton
+          title="Reset skew"
+          disabled={nearZero(skewX) && nearZero(skewY)}
+          onClick={() => onChange({ skewX: 0, skewY: 0 })}
+        >
+          <Square size={14} />
+        </ResetIconButton>
+      </div>
+      <PropSlider
+        label="Skew Y"
+        value={skewY}
+        min={-70}
+        max={70}
+        step={0.5}
+        suffix="°"
+        onChange={(next) => onChange({ skewY: next })}
+      />
     </div>
   );
 }
@@ -363,14 +458,26 @@ function GlassOptionsFields({
         step={0.01}
         onChange={(bloomOpacity) => patch({ bloomOpacity })}
       />
-      <SliderField
-        label="Flares"
-        value={opts.flares}
-        min={0}
-        max={2}
-        step={0.05}
-        onChange={(flares) => patch({ flares })}
-      />
+      <div class="flex items-end gap-1.5">
+        <div class="flex-1 min-w-0">
+          <SliderField
+            label="Flares"
+            value={opts.flares}
+            min={0}
+            max={2}
+            step={0.05}
+            onChange={(flares) => patch({ flares })}
+          />
+        </div>
+        <button
+          type="button"
+          class="mb-0.5 p-1.5 rounded-md border border-border-mid bg-transparent text-fg-muted cursor-pointer hover:text-fg hover:border-accent"
+          title="Randomize glare and spark location"
+          onClick={() => patch({ flareSeed: newGlassFlareSeed() })}
+        >
+          <Shuffle size={14} />
+        </button>
+      </div>
     </div>
   );
 }
@@ -978,22 +1085,53 @@ export function RightSidebar() {
                 />
               </div>
             )}
-            {selectedCount === 1 && (
+            {selectedCount === 1 ? (
               <div>
                 <label class="text-[11px] text-fg-muted mb-1 block">Id</label>
-                <input
-                  key={(selectedObject as { _layerId?: string })._layerId || "id"}
-                  type="text"
-                  class="w-full bg-surface-card border border-border-mid rounded-md text-xs text-fg-secondary px-2 py-1.5 outline-none focus:border-accent font-mono"
-                  placeholder="rect_1"
-                  defaultValue={readObjectId(selectedObject)}
-                  onBlur={(e) =>
-                    updateSelectedObject({ _id: (e.target as HTMLInputElement).value })
-                  }
-                />
+                <div class="flex items-center gap-1.5">
+                  <input
+                    key={(selectedObject as { _layerId?: string })._layerId || "id"}
+                    type="text"
+                    class="min-w-0 flex-1 bg-surface-card border border-border-mid rounded-md text-xs text-fg-secondary px-2 py-1.5 outline-none focus:border-accent font-mono"
+                    placeholder="rect_1"
+                    defaultValue={readObjectId(selectedObject)}
+                    onBlur={(e) =>
+                      updateSelectedObject({ _id: (e.target as HTMLInputElement).value })
+                    }
+                  />
+                  <button
+                    type="button"
+                    class={`shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-md border cursor-pointer ${
+                      selectedObject.visible !== false
+                        ? "border-border-dim bg-surface-card text-fg-secondary hover:border-accent"
+                        : "border-accent bg-accent/10 text-fg"
+                    }`}
+                    onClick={() => updateSelectedObject({ visible: selectedObject.visible === false })}
+                    title={selectedObject.visible === false ? "Show" : "Hide"}
+                    aria-pressed={selectedObject.visible !== false}
+                  >
+                    {selectedObject.visible === false ? <EyeOff size={13} /> : <Eye size={13} />}
+                  </button>
+                </div>
                 {readElementSource(selectedObject) ? (
                   <p class="text-[10px] text-fg-muted mt-1 mb-0">From element library</p>
                 ) : null}
+              </div>
+            ) : (
+              <div class="flex justify-end">
+                <button
+                  type="button"
+                  class={`shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-md border cursor-pointer ${
+                    selectedObject.visible !== false
+                      ? "border-border-dim bg-surface-card text-fg-secondary hover:border-accent"
+                      : "border-accent bg-accent/10 text-fg"
+                  }`}
+                  onClick={() => updateSelectedObject({ visible: selectedObject.visible === false })}
+                  title={selectedObject.visible === false ? "Show" : "Hide"}
+                  aria-pressed={selectedObject.visible !== false}
+                >
+                  {selectedObject.visible === false ? <EyeOff size={13} /> : <Eye size={13} />}
+                </button>
               </div>
             )}
             {isGroup && (
@@ -1002,10 +1140,179 @@ export function RightSidebar() {
             {isInner && (
               <p class="text-[10px] text-fg-muted m-0">Editing inside the group. Click the group to go back.</p>
             )}
+        </PanelSection>
 
-        {/* ── Text properties ───────────────────────────────────────── */}
+        <PanelSection title="Transformation">
+          <div>
+            <label class="text-[11px] text-fg-muted mb-1 block">Reset</label>
+            <div class="flex flex-wrap gap-1">
+              <button
+                class="p-1.5 rounded-md text-fg-muted bg-surface-card border border-border-dim cursor-pointer hover:border-accent hover:text-fg disabled:opacity-30 disabled:cursor-not-allowed"
+                disabled={!selectedObject || nearZero(selectedObject.angle || 0)}
+                onClick={() => updateSelectedObject({ angle: 0 })}
+                title="Reset rotation"
+              >
+                <RotateCcw size={14} />
+              </button>
+              <button
+                class="p-1.5 rounded-md text-fg-muted bg-surface-card border border-border-dim cursor-pointer hover:border-accent hover:text-fg disabled:opacity-30 disabled:cursor-not-allowed"
+                disabled={
+                  !selectedObject ||
+                  (nearZero(selectedObject.skewX || 0) && nearZero(selectedObject.skewY || 0))
+                }
+                onClick={() => updateSelectedObject({ skewX: 0, skewY: 0 })}
+                title="Reset skew"
+              >
+                <Square size={14} />
+              </button>
+              <button
+                class="p-1.5 rounded-md text-fg-muted bg-surface-card border border-border-dim cursor-pointer hover:border-accent hover:text-fg disabled:opacity-30 disabled:cursor-not-allowed"
+                disabled={!isCroppableImage(selectedObject)}
+                onClick={resetSelectedImage}
+                title="Reset clip, origin, and size"
+              >
+                <RotateCcw size={14} />
+              </button>
+            </div>
+          </div>
+          <div class="flex flex-wrap gap-1">
+            <button
+              class="p-1.5 rounded-md text-fg-muted bg-surface-card border border-border-dim cursor-pointer hover:border-accent hover:text-fg disabled:opacity-30 disabled:cursor-not-allowed"
+              disabled={!canRestack}
+              onClick={sendSelectionToBack}
+              title="Send selected to back (Ctrl+[)"
+            >
+              <SendToBack size={14} />
+            </button>
+            <button
+              class="p-1.5 rounded-md text-fg-muted bg-surface-card border border-border-dim cursor-pointer hover:border-accent hover:text-fg disabled:opacity-30 disabled:cursor-not-allowed"
+              disabled={!canRestack}
+              onClick={bringSelectionToFront}
+              title="Bring selected to front (Ctrl+])"
+            >
+              <BringToFront size={14} />
+            </button>
+            <button
+              class="p-1.5 rounded-md text-fg-muted bg-surface-card border border-border-dim cursor-pointer hover:border-accent hover:text-fg disabled:opacity-30 disabled:cursor-not-allowed"
+              disabled={!canAlign}
+              onClick={() => alignSelected("left")}
+              title="Align left to first selected"
+            >
+              <AlignStartVertical size={14} />
+            </button>
+            <button
+              class="p-1.5 rounded-md text-fg-muted bg-surface-card border border-border-dim cursor-pointer hover:border-accent hover:text-fg disabled:opacity-30 disabled:cursor-not-allowed"
+              disabled={!canAlign}
+              onClick={() => alignSelected("right")}
+              title="Align right to first selected"
+            >
+              <AlignEndVertical size={14} />
+            </button>
+            <button
+              class="p-1.5 rounded-md text-fg-muted bg-surface-card border border-border-dim cursor-pointer hover:border-accent hover:text-fg disabled:opacity-30 disabled:cursor-not-allowed"
+              disabled={!canAlign}
+              onClick={() => alignSelected("top")}
+              title="Align top to first selected"
+            >
+              <AlignStartHorizontal size={14} />
+            </button>
+            <button
+              class="p-1.5 rounded-md text-fg-muted bg-surface-card border border-border-dim cursor-pointer hover:border-accent hover:text-fg disabled:opacity-30 disabled:cursor-not-allowed"
+              disabled={!canAlign}
+              onClick={() => alignSelected("bottom")}
+              title="Align bottom to first selected"
+            >
+              <AlignEndHorizontal size={14} />
+            </button>
+            <button
+              class="p-1.5 rounded-md text-fg-muted bg-surface-card border border-border-dim cursor-pointer hover:border-accent hover:text-fg disabled:opacity-30 disabled:cursor-not-allowed"
+              disabled={!canAlign}
+              onClick={() => matchSelectedSize("width")}
+              title="Same width as first selected"
+            >
+              <UnfoldHorizontal size={14} />
+            </button>
+            <button
+              class="p-1.5 rounded-md text-fg-muted bg-surface-card border border-border-dim cursor-pointer hover:border-accent hover:text-fg disabled:opacity-30 disabled:cursor-not-allowed"
+              disabled={!canAlign}
+              onClick={() => matchSelectedSize("height")}
+              title="Same height as first selected"
+            >
+              <UnfoldVertical size={14} />
+            </button>
+            <button
+              class="p-1.5 rounded-md text-fg-muted bg-surface-card border border-border-dim cursor-pointer hover:border-accent hover:text-fg disabled:opacity-30 disabled:cursor-not-allowed"
+              disabled={!selectedObject}
+              onClick={maximizeSelected}
+              title="Maximize to canvas"
+            >
+              <Maximize2 size={14} />
+            </button>
+          </div>
+          <div class="flex gap-1">
+            <button
+              class="flex-1 px-2 py-1.5 rounded-md text-[11px] font-medium border border-border-dim bg-surface-card cursor-pointer hover:border-accent disabled:opacity-30 disabled:cursor-not-allowed"
+              disabled={!canGroup}
+              onClick={groupSelected}
+              title="Group selected (Ctrl+G)"
+            >
+              Group
+            </button>
+            <button
+              class="flex-1 px-2 py-1.5 rounded-md text-[11px] font-medium border border-border-dim bg-surface-card cursor-pointer hover:border-accent disabled:opacity-30 disabled:cursor-not-allowed"
+              disabled={!canUngroup}
+              onClick={ungroupSelected}
+              title="Ungroup (Ctrl+Shift+G)"
+            >
+              Ungroup
+            </button>
+            <button
+              class="flex-1 px-2 py-1.5 rounded-md text-[11px] font-medium border border-border-dim bg-surface-card cursor-pointer hover:border-accent"
+              onClick={() => void saveSelectionAsElement()}
+              title="Save to Elements library"
+            >
+              As Element
+            </button>
+          </div>
+          <ScaleFields obj={selectedObject} onChange={updateSelectedObject} />
+          <RotateSkewFields obj={selectedObject} onChange={updateSelectedObject} />
+          {isImage && (
+            <p class="text-[10px] text-fg-muted m-0">
+              Shift-drag to pan the crop. Shift-drag a corner to zoom inside the frame. Shift-drag a side handle to clip without stretching.
+            </p>
+          )}
+          {isImage && isCroppableImage(selectedObject) && (
+            <ImageCropFields obj={selectedObject} onCommit={() => updateSelectedObject({})} />
+          )}
+          {selectedObject instanceof fabric.Rect && (
+            <PropSlider
+              label="Corner radius"
+              value={readCornerRadius(selectedObject)}
+              min={0}
+              max={120}
+              step={1}
+              suffix="px"
+              onChange={(radius) => updateSelectedObject({ _cornerRadius: radius })}
+            />
+          )}
+          {isImage && (
+            <PropSlider
+              label="Corner radius"
+              value={readImageCornerRadius(selectedObject)}
+              min={0}
+              max={120}
+              step={1}
+              suffix="px"
+              onChange={(radius) => updateSelectedObject({ _cornerRadius: radius })}
+            />
+          )}
+          {(isImage || isIcon) && (
+            <FlipFields obj={selectedObject} onChange={updateSelectedObject} />
+          )}
+        </PanelSection>
+
         {isText && (
-          <>
+          <PanelSection title="Text">
             {/* Font family */}
             <div>
               <label class="text-[11px] text-fg-muted mb-1 block">Font family</label>
@@ -1147,12 +1454,11 @@ export function RightSidebar() {
               step={10}
               onChange={(charSpacing) => updateSelectedObject({ charSpacing })}
             />
-          </>
+          </PanelSection>
         )}
 
-        {/* ── Shape properties ──────────────────────────────────────── */}
         {isShape && (
-          <>
+          <PanelSection title={isIcon ? "Icon" : "Shape"}>
             {isIcon && (
               <div>
                 <label class="text-[11px] text-fg-muted mb-1 block">Icon</label>
@@ -1256,12 +1562,11 @@ export function RightSidebar() {
               )}
             </div>
             )}
-          </>
+          </PanelSection>
         )}
 
-        {/* ── Image properties ──────────────────────────────────────── */}
         {isImage && (
-          <>
+          <PanelSection title="Image">
             <ImagePickerField
               kind="images"
               currentUrl={typeof selectedObject.getSrc === "function" ? selectedObject.getSrc() : ""}
@@ -1287,169 +1592,8 @@ export function RightSidebar() {
               <ClipboardPaste size={14} class="text-fg-muted" />
               <span class="text-[11px] text-fg-secondary">Paste to replace</span>
             </button>
-          </>
+          </PanelSection>
         )}
-
-        <div>
-          <label class="text-[11px] text-fg-muted mb-1 block">Visible</label>
-          <button
-            class={`w-full inline-flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] font-medium border cursor-pointer ${
-              selectedObject.visible !== false
-                ? "border-border-dim bg-surface-card text-fg-secondary hover:border-accent"
-                : "border-accent bg-accent/10 text-fg"
-            }`}
-            onClick={() => updateSelectedObject({ visible: selectedObject.visible === false })}
-            title={selectedObject.visible === false ? "Show" : "Hide"}
-          >
-            {selectedObject.visible === false ? <EyeOff size={13} /> : <Eye size={13} />}
-            {selectedObject.visible === false ? "Hidden" : "Shown"}
-          </button>
-        </div>
-        </PanelSection>
-
-        <PanelSection title="Transformation">
-          <div class="flex flex-wrap gap-1">
-            <button
-              class="p-1.5 rounded-md text-fg-muted bg-surface-card border border-border-dim cursor-pointer hover:border-accent hover:text-fg disabled:opacity-30 disabled:cursor-not-allowed"
-              disabled={!canRestack}
-              onClick={sendSelectionToBack}
-              title="Send selected to back (Ctrl+[)"
-            >
-              <SendToBack size={14} />
-            </button>
-            <button
-              class="p-1.5 rounded-md text-fg-muted bg-surface-card border border-border-dim cursor-pointer hover:border-accent hover:text-fg disabled:opacity-30 disabled:cursor-not-allowed"
-              disabled={!canRestack}
-              onClick={bringSelectionToFront}
-              title="Bring selected to front (Ctrl+])"
-            >
-              <BringToFront size={14} />
-            </button>
-            <button
-              class="p-1.5 rounded-md text-fg-muted bg-surface-card border border-border-dim cursor-pointer hover:border-accent hover:text-fg disabled:opacity-30 disabled:cursor-not-allowed"
-              disabled={!canAlign}
-              onClick={() => alignSelected("left")}
-              title="Align left to first selected"
-            >
-              <AlignStartVertical size={14} />
-            </button>
-            <button
-              class="p-1.5 rounded-md text-fg-muted bg-surface-card border border-border-dim cursor-pointer hover:border-accent hover:text-fg disabled:opacity-30 disabled:cursor-not-allowed"
-              disabled={!canAlign}
-              onClick={() => alignSelected("right")}
-              title="Align right to first selected"
-            >
-              <AlignEndVertical size={14} />
-            </button>
-            <button
-              class="p-1.5 rounded-md text-fg-muted bg-surface-card border border-border-dim cursor-pointer hover:border-accent hover:text-fg disabled:opacity-30 disabled:cursor-not-allowed"
-              disabled={!canAlign}
-              onClick={() => alignSelected("top")}
-              title="Align top to first selected"
-            >
-              <AlignStartHorizontal size={14} />
-            </button>
-            <button
-              class="p-1.5 rounded-md text-fg-muted bg-surface-card border border-border-dim cursor-pointer hover:border-accent hover:text-fg disabled:opacity-30 disabled:cursor-not-allowed"
-              disabled={!canAlign}
-              onClick={() => alignSelected("bottom")}
-              title="Align bottom to first selected"
-            >
-              <AlignEndHorizontal size={14} />
-            </button>
-            <button
-              class="p-1.5 rounded-md text-fg-muted bg-surface-card border border-border-dim cursor-pointer hover:border-accent hover:text-fg disabled:opacity-30 disabled:cursor-not-allowed"
-              disabled={!canAlign}
-              onClick={() => matchSelectedSize("width")}
-              title="Same width as first selected"
-            >
-              <UnfoldHorizontal size={14} />
-            </button>
-            <button
-              class="p-1.5 rounded-md text-fg-muted bg-surface-card border border-border-dim cursor-pointer hover:border-accent hover:text-fg disabled:opacity-30 disabled:cursor-not-allowed"
-              disabled={!canAlign}
-              onClick={() => matchSelectedSize("height")}
-              title="Same height as first selected"
-            >
-              <UnfoldVertical size={14} />
-            </button>
-            <button
-              class="p-1.5 rounded-md text-fg-muted bg-surface-card border border-border-dim cursor-pointer hover:border-accent hover:text-fg disabled:opacity-30 disabled:cursor-not-allowed"
-              disabled={!selectedObject}
-              onClick={maximizeSelected}
-              title="Maximize to canvas"
-            >
-              <Maximize2 size={14} />
-            </button>
-            <button
-              class="p-1.5 rounded-md text-fg-muted bg-surface-card border border-border-dim cursor-pointer hover:border-accent hover:text-fg disabled:opacity-30 disabled:cursor-not-allowed"
-              disabled={!isCroppableImage(selectedObject)}
-              onClick={resetSelectedImage}
-              title="Reset clip, origin, and size"
-            >
-              <RotateCcw size={14} />
-            </button>
-          </div>
-          <div class="flex gap-1">
-            <button
-              class="flex-1 px-2 py-1.5 rounded-md text-[11px] font-medium border border-border-dim bg-surface-card cursor-pointer hover:border-accent disabled:opacity-30 disabled:cursor-not-allowed"
-              disabled={!canGroup}
-              onClick={groupSelected}
-              title="Group selected (Ctrl+G)"
-            >
-              Group
-            </button>
-            <button
-              class="flex-1 px-2 py-1.5 rounded-md text-[11px] font-medium border border-border-dim bg-surface-card cursor-pointer hover:border-accent disabled:opacity-30 disabled:cursor-not-allowed"
-              disabled={!canUngroup}
-              onClick={ungroupSelected}
-              title="Ungroup (Ctrl+Shift+G)"
-            >
-              Ungroup
-            </button>
-            <button
-              class="flex-1 px-2 py-1.5 rounded-md text-[11px] font-medium border border-border-dim bg-surface-card cursor-pointer hover:border-accent"
-              onClick={() => void saveSelectionAsElement()}
-              title="Save to Elements library"
-            >
-              As Element
-            </button>
-          </div>
-          <ScaleFields obj={selectedObject} onChange={updateSelectedObject} />
-          {isImage && (
-            <p class="text-[10px] text-fg-muted m-0">
-              Shift-drag to pan the crop. Shift-drag a corner to zoom inside the frame. Shift-drag a side handle to clip without stretching.
-            </p>
-          )}
-          {isImage && isCroppableImage(selectedObject) && (
-            <ImageCropFields obj={selectedObject} onCommit={() => updateSelectedObject({})} />
-          )}
-          {selectedObject instanceof fabric.Rect && (
-            <PropSlider
-              label="Corner radius"
-              value={readCornerRadius(selectedObject)}
-              min={0}
-              max={120}
-              step={1}
-              suffix="px"
-              onChange={(radius) => updateSelectedObject({ _cornerRadius: radius })}
-            />
-          )}
-          {isImage && (
-            <PropSlider
-              label="Corner radius"
-              value={readImageCornerRadius(selectedObject)}
-              min={0}
-              max={120}
-              step={1}
-              suffix="px"
-              onChange={(radius) => updateSelectedObject({ _cornerRadius: radius })}
-            />
-          )}
-          {(isImage || isIcon) && (
-            <FlipFields obj={selectedObject} onChange={updateSelectedObject} />
-          )}
-        </PanelSection>
 
         <PanelSection title="Effects">
           <div class="flex flex-col gap-1.5">

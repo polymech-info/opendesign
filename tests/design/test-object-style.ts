@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import * as fabric from "fabric";
 
-import { applyObjectStyle, captureObjectStyle } from "../../src/client/lib/object-style.ts";
+import { applyObjectStyle, applyStyledTextPatch, captureObjectStyle } from "../../src/client/lib/object-style.ts";
 import { applyStylePreset, readStylePreset } from "../../src/client/lib/style-presets.ts";
 
 const shadow = new fabric.Shadow({
@@ -107,5 +107,57 @@ const cleared = captureObjectStyle(new fabric.Rect({ width: 40, height: 40, fill
 assert.equal(cleared.shadow, null);
 applyObjectStyle(plain, cleared);
 assert.equal(plain.shadow, null, "pasting a style without shadow clears the target shadow");
+
+function fakeText(init: {
+  styles?: Record<string, Record<string, Record<string, unknown>>>;
+  isEditing?: boolean;
+  selectionStart?: number;
+  selectionEnd?: number;
+}) {
+  const styles = init.styles ?? {};
+  const calls: Array<{ patch: Record<string, unknown>; start: number; end: number }> = [];
+  return {
+    styles,
+    isEditing: init.isEditing ?? false,
+    selectionStart: init.selectionStart ?? 0,
+    selectionEnd: init.selectionEnd ?? 0,
+    dirty: false,
+    calls,
+    removeStyle(property: string) {
+      for (const lineNum of Object.keys(styles)) {
+        const line = styles[lineNum];
+        for (const charNum of Object.keys(line)) {
+          delete line[charNum][property];
+          if (Object.keys(line[charNum]).length === 0) delete line[charNum];
+        }
+        if (Object.keys(line).length === 0) delete styles[lineNum];
+      }
+    },
+    setSelectionStyles(patch: object, start: number, end: number) {
+      calls.push({ patch: { ...(patch as Record<string, unknown>) }, start, end });
+    },
+  };
+}
+
+const leftover = fakeText({
+  styles: {
+    2: { 0: { fontSize: 27, fontFamily: "Poppins" } },
+    3: { 0: { fontSize: 27, fontFamily: "Poppins" } },
+  },
+});
+applyStyledTextPatch(leftover, { fontSize: 40, fontFamily: "Inter" });
+assert.deepEqual(leftover.styles, {});
+assert.equal(leftover.dirty, true);
+assert.equal(leftover.calls.length, 0);
+
+const selected = fakeText({
+  isEditing: true,
+  selectionStart: 0,
+  selectionEnd: 5,
+  styles: { 1: { 0: { fontSize: 12 } } },
+});
+applyStyledTextPatch(selected, { fontSize: 30 });
+assert.deepEqual(selected.calls, [{ patch: { fontSize: 30 }, start: 0, end: 5 }]);
+assert.deepEqual(selected.styles, { 1: { 0: { fontSize: 12 } } }, "in-edit range keeps other rows");
 
 console.log("test:object-style PASS");

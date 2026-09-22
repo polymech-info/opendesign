@@ -1,4 +1,4 @@
-import { ensureLlmServer, type LlmTarget } from "../server/llm.js";
+import { deferLlmServer, type LlmTarget } from "../server/llm.js";
 import { handleMcpRpc } from "./handler.js";
 import { mcpRoots } from "./session.js";
 import type { McpContext } from "./tools.js";
@@ -41,7 +41,7 @@ export async function runMcpStdio(opts: { cwd: string; llm?: LlmTarget; searchFr
   const cwd = mcpRoots(opts.cwd).cwd;
   const llmHandle = opts.llm
     ? { ...opts.llm, stop: () => {} }
-    : await ensureLlmServer({ cwd: mcpRoots(cwd).project, searchFrom: opts.searchFrom ?? cwd });
+    : deferLlmServer({ cwd: mcpRoots(cwd).project, searchFrom: opts.searchFrom ?? cwd });
   const ctx: McpContext = { cwd, llm: llmHandle };
   logErr(`stdio ready cwd=${cwd} llm=${llmHandle.url}`);
   let buf = Buffer.alloc(0);
