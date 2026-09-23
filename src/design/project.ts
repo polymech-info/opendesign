@@ -75,6 +75,23 @@ function tablerName(node: DesignNode): string {
   return ICON_TABLER[raw] || raw || "circle";
 }
 
+function gradientExtras(props: Record<string, string>): FabricObjectJSON {
+  const out: FabricObjectJSON = {};
+  for (const [key, dest] of [
+    ["gradient", "_gradient"],
+    ["gradientMask", "_gradientMask"],
+  ] as const) {
+    const raw = props[key]?.trim();
+    if (!raw) continue;
+    try {
+      out[dest] = JSON.parse(raw);
+    } catch {
+      /* keep the live Fabric copy */
+    }
+  }
+  return out;
+}
+
 function withVisualExtras(
   obj: FabricObjectJSON,
   props: Record<string, string>,
@@ -83,7 +100,7 @@ function withVisualExtras(
   const glass = opts?.glass ? glassFromProps(props) : { enabled: false, extras: {} };
   const border = opts?.glass && !glass.enabled ? borderFromProps(props) : { enabled: false, extras: {} };
   const overlay = glass.enabled ? glass : border;
-  const out: FabricObjectJSON = { ...obj, ...overlay.extras };
+  const out: FabricObjectJSON = { ...obj, ...overlay.extras, ...gradientExtras(props) };
   const shadow = shadowFromProps(props);
   if (shadow) {
     out.shadow = shadow;
@@ -193,6 +210,7 @@ function projectNodeToFabric(doc: DesignDocument, node: DesignNode): FabricObjec
       _id: node.id,
       _designBounds: { w: node.bounds.w, h: node.bounds.h },
       ...(radius ? { _cornerRadius: radius, rx: radius, ry: radius } : {}),
+      ...gradientExtras(node.props),
     };
   }
   return null;

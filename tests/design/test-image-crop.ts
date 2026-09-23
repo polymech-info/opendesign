@@ -62,6 +62,17 @@ assert.equal(
   "clipping from the left keeps the right edge pinned"
 );
 
+const shortStart = {
+  cropX: img.cropX || 0,
+  cropY: img.cropY || 0,
+  width: img.width || 1,
+  height: img.height || 1,
+  scaleX: img.scaleX || 1,
+  scaleY: img.scaleY || 1,
+};
+clipImageCrop(img, "mb", 0, -4000, shortStart);
+assert.ok((img.height || 0) <= 8, "top/bottom clip can shrink to a thin strip");
+
 (img as { _sourceW?: number; _sourceH?: number })._sourceW = 1000;
 (img as { _sourceW?: number; _sourceH?: number })._sourceH = 500;
 img.set({ angle: 12, flipX: true, left: 40, top: 20 });

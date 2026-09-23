@@ -8,10 +8,10 @@ export const PROJECTABLE_FIELDS: Record<NodeType, readonly string[]> = {
   theme: [],
   widget: [],
   use: ["x", "y", "w", "h"],
-  shape: ["fill", "stroke", "strokeWidth", "radius", "shadow", "glass", "glassOptions", "border", "borderOptions", "preset"],
-  txt: ["fill", "size", "font", "weight", "align", "text", "style", "shadow", "preset"],
+  shape: ["fill", "stroke", "strokeWidth", "radius", "shadow", "glass", "glassOptions", "border", "borderOptions", "preset", "gradient", "gradientMask"],
+  txt: ["fill", "size", "font", "weight", "align", "text", "style", "shadow", "preset", "gradient", "gradientMask"],
   icon: ["icon", "fill", "shadow"],
-  img: ["src", "fit"],
+  img: ["src", "fit", "gradient", "gradientMask"],
   line: [],
   group: [],
   video: [],
@@ -22,7 +22,6 @@ export const PROJECTABLE_FIELDS: Record<NodeType, readonly string[]> = {
 export const EDITOR_ONLY_FIELDS = [
   "_stylePreset",
   "opacity",
-  "gradient",
   "pattern",
   "blur",
   "tint",
@@ -34,7 +33,7 @@ export function designPatchFieldHints(): string {
     "txt: fill, size, font, weight, align (textAlign only), text, style, shadow",
     "icon: fill, icon (glyph id), shadow",
     "preset card.soft etc. merge under node.props overrides",
-    "NOT projected: opacity, gradients, raw _stylePreset (use glass=true or border=true on shapes)",
+    "NOT projected: opacity, raw _stylePreset (use glass=true or border=true on shapes)",
   ].join("\n");
 }
 

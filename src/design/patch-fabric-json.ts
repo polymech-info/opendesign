@@ -25,6 +25,8 @@ const STYLE_KEYS = [
   "fontWeight",
   "textAlign",
   "_iconFill",
+  "_gradient",
+  "_gradientMask",
   "opacity",
   "text",
 ] as const;

@@ -31,7 +31,7 @@ import { LayersPanel } from "./layers-panel";
 import { IconsPanel } from "./icons-panel";
 import { ElementsLibrary } from "./elements-library";
 import { ChatPanel } from "../modules/ai/ChatPanel";
-import { GRADIENT_PRESETS } from "../lib/fill-presets";
+import { BackgroundFillPanel } from "./background-fill";
 import type { ShapeKind } from "../lib/shapes";
 
 type Section = EditorPanel;
@@ -44,7 +44,7 @@ const SECTIONS: { key: Section; icon: typeof LayoutGrid; label: string }[] = [
   { key: "layers", icon: Layers, label: "Layers" },
   { key: "text", icon: Type, label: "Text" },
   { key: "images", icon: Upload, label: "Uploads" },
-  { key: "background", icon: Palette, label: "Bg" },
+  { key: "background", icon: Palette, label: "Background" },
   { key: "designs", icon: LayoutGrid, label: "Designs" },
   { key: "versions", icon: History, label: "Versions" },
 ];
@@ -61,13 +61,6 @@ const SECTION_TITLES: Record<Section, string> = {
   designs: "Designs",
   versions: "Versions",
 };
-
-const BG_COLORS = [
-  "#1a1a2e", "#0f172a", "#18181b", "#1e1b4b",
-  "#ffffff", "#f8fafc", "#fafaf9", "#fef3c7",
-  "#2563eb", "#7c3aed", "#dc2626", "#059669",
-  "#0891b2", "#d97706", "#e11d48", "#4f46e5",
-];
 
 const SHAPE_BUTTONS: { type: ShapeKind; icon: typeof Square; label: string }[] = [
   { type: "rect", icon: Square, label: "Rectangle" },
@@ -111,7 +104,7 @@ export function LeftSidebar() {
             onClick={() => handleSectionClick(s.key)}
           >
             <s.icon size={20} />
-            <span class="text-[10px] leading-tight">{s.label}</span>
+            <span class="text-[9px] leading-tight text-center px-0.5">{s.label}</span>
           </button>
         ))}
       </div>
@@ -243,40 +236,8 @@ export function LeftSidebar() {
 
                 {activeSection === "background" && (
                   <div>
-                    <p class="text-fg-muted text-[11px] mb-2">Solid colors</p>
-                    <div class="grid grid-cols-4 gap-1.5 mb-4">
-                      {BG_COLORS.map((c) => (
-                        <button
-                          key={c}
-                          class="w-full aspect-square rounded-md border border-border-mid cursor-pointer transition-all hover:scale-110 hover:border-accent"
-                          style={{ background: c }}
-                          onClick={() => setBackground("color", c)}
-                        />
-                      ))}
-                    </div>
-
-                    <p class="text-fg-muted text-[11px] mb-2">Custom color</p>
-                    <input
-                      type="color"
-                      class="w-full h-8 rounded-md border border-border-mid cursor-pointer bg-transparent"
-                      onChange={(e) =>
-                        setBackground("color", (e.target as HTMLInputElement).value)
-                      }
-                    />
-
-                    <p class="text-fg-muted text-[11px] mb-2 mt-4">Gradient presets</p>
-                    <div class="grid grid-cols-3 gap-1.5 mb-4">
-                      {GRADIENT_PRESETS.map((g, i) => (
-                        <button
-                          key={i}
-                          class="w-full aspect-square rounded-md border border-border-mid cursor-pointer transition-all hover:scale-110 hover:border-accent"
-                          style={{ background: g }}
-                          onClick={() => setBackground("gradient", g)}
-                        />
-                      ))}
-                    </div>
-
-                    <p class="text-fg-muted text-[11px] mb-2">Background images</p>
+                    <BackgroundFillPanel />
+                    <p class="text-fg-muted text-[11px] mb-2 mt-4">Background images</p>
                     <p class="text-fg-muted text-[10px] mb-2">Stored in uploads/backgrounds/ — click a thumbnail to apply, or drop files here</p>
                     <MediaLibrary kind="backgrounds" currentUrl={pagePhotoSrc(canvas)} onPick={(url) => setBackground("image", url)} />
                   </div>

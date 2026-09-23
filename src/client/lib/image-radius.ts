@@ -21,6 +21,8 @@ export const FABRIC_EXTRA_PROPS = [
   "_elementSource",
   "_sourceW",
   "_sourceH",
+  "_gradient",
+  "_gradientMask",
 ] as const;
 
 type ImageWithRadius = fabric.FabricImage & { _cornerRadius?: number };

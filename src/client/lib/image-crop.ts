@@ -3,11 +3,18 @@ import { isBgImage } from "./background-image";
 import { applyImageCornerRadius, readImageCornerRadius } from "./image-radius";
 import { abortCanvasTransform, isElementGroup } from "./element-group";
 import { type ObjectFrame } from "./object-frame";
+import { clearSnapGuides, snapResizingEdge, type ResizeEdge } from "./snap-guides";
 import { isIconObject } from "./tabler-icons";
+import { resizeCursorForHandle } from "./resize-cursor";
 
 const CORNERS = new Set(["tl", "tr", "bl", "br"]);
 const MIDS = new Set(["ml", "mr", "mt", "mb"]);
-const MIN_CROP = 24;
+const MIN_CROP = 8;
+const MIN_CROP_RATIO = 0.01;
+
+function minCropAxis(source: number) {
+  return Math.min(source, Math.max(MIN_CROP, source * MIN_CROP_RATIO));
+}
 
 export type ImageClipHandle = "ml" | "mr" | "mt" | "mb";
 
@@ -200,7 +207,7 @@ function applyCropWindow(
   const displayW = Math.max(1, (img.width || 1) * Math.abs(img.scaleX || 1));
   const displayH = Math.max(1, (img.height || 1) * Math.abs(img.scaleY || 1));
   const aspect = displayW / displayH;
-  const minW = Math.min(src.w, Math.max(MIN_CROP, src.w * 0.04));
+  const minW = minCropAxis(src.w);
   const minH = minW / aspect;
   let w = clamp(width, minW, src.w);
   let h = w / aspect;
@@ -296,18 +303,27 @@ function sceneDeltaToSource(
   };
 }
 
+function clipHandleEdge(handle: ImageClipHandle): ResizeEdge {
+  if (handle === "ml") return "left";
+  if (handle === "mr") return "right";
+  if (handle === "mt") return "top";
+  return "bottom";
+}
+
 /** Shift + mid-handle: resize the crop window. Scale stays put (no stretch). */
 export function clipImageCrop(
   img: fabric.FabricImage,
   handle: ImageClipHandle,
   sceneDx: number,
   sceneDy: number,
-  start: ImageClipStart
+  start: ImageClipStart,
+  canvas?: fabric.Canvas | null,
+  evt?: Event | null
 ) {
   const src = imageSourceSize(img);
   const delta = sceneDeltaToSource(sceneDx, sceneDy, start);
-  const minW = Math.min(src.w, Math.max(MIN_CROP, src.w * 0.04));
-  const minH = Math.min(src.h, Math.max(MIN_CROP, src.h * 0.04));
+  const minW = minCropAxis(src.w);
+  const minH = minCropAxis(src.h);
   let cropX = start.cropX;
   let cropY = start.cropY;
   let width = start.width;
@@ -342,6 +358,10 @@ export function clipImageCrop(
   applyImageCornerRadius(img, readImageCornerRadius(img));
   img.setCoords();
   img.dirty = true;
+  if (!canvas) return;
+  const extra = snapResizingEdge(canvas, img, clipHandleEdge(handle), evt);
+  if (!extra.dx && !extra.dy) return;
+  clipImageCrop(img, handle, sceneDx + extra.dx, sceneDy + extra.dy, start);
 }
 
 export function readImageCrop(img: fabric.FabricImage) {
@@ -351,7 +371,7 @@ export function readImageCrop(img: fabric.FabricImage) {
   const cropX = img.cropX || 0;
   const cropY = img.cropY || 0;
   const zoom = fit.w / width;
-  const maxZoom = fit.w / Math.min(fit.w, Math.max(MIN_CROP, fit.src.w * 0.04));
+  const maxZoom = fit.w / Math.min(fit.w, minCropAxis(fit.src.w));
   return {
     cropX,
     cropY,
@@ -474,7 +494,7 @@ export function installImageCropGestures(canvas: fabric.Canvas, onCommit: () => 
       img.lockScalingY = gesture.locks.scaleY;
     }
     gesture = null;
-    canvas.setCursor("default");
+    clearSnapGuides(canvas);
     canvas.requestRenderAll();
     if (commit) onCommit();
   };
@@ -516,6 +536,7 @@ export function installImageCropGestures(canvas: fabric.Canvas, onCommit: () => 
       img.lockMovementY = true;
       img.lockScalingX = true;
       img.lockScalingY = true;
+      canvas.setCursor(resizeCursorForHandle(img, handle));
     } else if (hit && MIDS.has(hit.key)) {
       const handle = hit.key as ImageClipHandle;
       img.setCoords();
@@ -549,6 +570,7 @@ export function installImageCropGestures(canvas: fabric.Canvas, onCommit: () => 
       img.lockMovementY = true;
       img.lockScalingX = true;
       img.lockScalingY = true;
+      canvas.setCursor(resizeCursorForHandle(img, handle));
     } else if (!hit) {
       gesture = {
         mode: "pan",
@@ -571,17 +593,22 @@ export function installImageCropGestures(canvas: fabric.Canvas, onCommit: () => 
     if (gesture.mode === "pan") {
       panImageCrop(gesture.img, scene.x - gesture.last.x, scene.y - gesture.last.y);
       gesture.last = scene;
+      canvas.setCursor("grabbing");
     } else if (gesture.mode === "clip") {
       clipImageCrop(
         gesture.img,
         gesture.handle,
         scene.x - gesture.startScene.x,
         scene.y - gesture.startScene.y,
-        gesture.start
+        gesture.start,
+        canvas,
+        evt
       );
+      canvas.setCursor(resizeCursorForHandle(gesture.img, gesture.handle));
     } else {
       const dist = Math.hypot(scene.x - gesture.origin.x, scene.y - gesture.origin.y);
       zoomImageCrop(gesture.img, dist / gesture.startDist, gesture.handle, gesture.start);
+      canvas.setCursor(resizeCursorForHandle(gesture.img, gesture.handle));
     }
     canvas.requestRenderAll();
   };

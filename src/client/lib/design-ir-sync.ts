@@ -5,6 +5,7 @@ import { findNode } from "../../design/types";
 import { resolveUploadKey, uploadPublicUrl } from "../../design/upload-paths";
 import { readObjectId } from "./object-identity";
 import { captureObjectStyle } from "./object-style";
+import { readObjectGradient, readObjectGradientMask, stringifyGradient } from "./gradient";
 
 export function patchPageBackgroundInIr(patch: { src?: string; clear?: boolean }) {
   const doc = getActiveDocument();
@@ -55,7 +56,7 @@ export function syncObjectStyleInIr(obj: fabric.FabricObject) {
   const id = readObjectId(obj);
   if (!id) return;
   const node = findNode(doc, id);
-  if (!node || (node.type !== "shape" && node.type !== "txt" && node.type !== "icon")) return;
+  if (!node || (node.type !== "shape" && node.type !== "txt" && node.type !== "icon" && node.type !== "img")) return;
   const style = captureObjectStyle(obj);
   const set: Record<string, unknown> = {};
   if (typeof style.fill === "string" && style.fill) set.fill = style.fill;
@@ -88,6 +89,12 @@ export function syncObjectStyleInIr(obj: fabric.FabricObject) {
   if (node.type === "icon") {
     set.shadow = shadow;
   }
+  const fillGradient = readObjectGradient(obj);
+  const maskGradient = readObjectGradientMask(obj);
+  if (fillGradient) set.gradient = stringifyGradient(fillGradient);
+  else if (node.props.gradient) set.gradient = "";
+  if (maskGradient) set.gradientMask = stringifyGradient(maskGradient);
+  else if (node.props.gradientMask) set.gradientMask = "";
   if (!Object.keys(set).length) return;
   updateObjects(doc, { patches: [{ id, set }] });
   setActiveDocument(doc);

@@ -34,9 +34,61 @@ export function removePagePhoto(canvas: fabric.StaticCanvas | fabric.Canvas) {
   }
 }
 
+export function pageThemeLayer(canvas: fabric.StaticCanvas | fabric.Canvas) {
+  return pageLayer(canvas, "canvas.bg");
+}
+
+export function ensurePageThemeLayer(
+  canvas: fabric.StaticCanvas | fabric.Canvas,
+  width: number,
+  height: number
+): fabric.Rect {
+  const existing = pageThemeLayer(canvas);
+  if (existing instanceof fabric.Rect) {
+    existing.set({
+      left: 0,
+      top: 0,
+      originX: "left",
+      originY: "top",
+      width,
+      height,
+      selectable: false,
+      evented: false,
+      hasControls: false,
+      hasBorders: false,
+    });
+    return existing;
+  }
+  const fallback =
+    typeof canvas.backgroundColor === "string" && canvas.backgroundColor
+      ? canvas.backgroundColor
+      : "#ffffff";
+  const bg = new fabric.Rect({
+    left: 0,
+    top: 0,
+    originX: "left",
+    originY: "top",
+    width,
+    height,
+    fill: fallback,
+    selectable: false,
+    evented: false,
+    hasControls: false,
+    hasBorders: false,
+  });
+  (bg as { _id?: string })._id = "canvas.bg";
+  canvas.add(bg);
+  stackPageBackgroundLayers(canvas);
+  return bg;
+}
+
 export function setPageThemeFill(canvas: fabric.StaticCanvas | fabric.Canvas, fill: string) {
-  const bg = pageLayer(canvas, "canvas.bg");
-  if (bg) bg.set("fill", fill);
+  const bg = pageThemeLayer(canvas);
+  if (bg) {
+    (bg as { _gradient?: null })._gradient = null;
+    bg.set("fill", fill);
+    bg.dirty = true;
+  }
 }
 
 /** Theme fill rect at index 0, optional photo bg directly above it. */

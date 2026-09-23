@@ -17,6 +17,8 @@ export const STYLE_PROPS = new Set([
   "font",
   "weight",
   "align",
+  "gradient",
+  "gradientMask",
 ]);
 
 export const SKIP_PROPS = new Set(["x", "y", "w", "h", "width", "height", "widget", "id", "icon", "text", "src", "role", "preset", "style", "as"]);
@@ -99,6 +101,10 @@ export function enrichDocumentFromFabric(doc: DesignDocument, fabricRaw: string)
         (typeof rec._iconFill === "string" && rec._iconFill) ||
         (typeof rec.fill === "string" && rec.fill.startsWith("#") ? rec.fill : "");
       if (live && !node.props.fill) node.props.fill = live;
+      const fillGradient = rec._gradient && typeof rec._gradient === "object" ? rec._gradient : null;
+      const maskGradient = rec._gradientMask && typeof rec._gradientMask === "object" ? rec._gradientMask : null;
+      if (fillGradient && !node.props.gradient) node.props.gradient = JSON.stringify(fillGradient);
+      if (maskGradient && !node.props.gradientMask) node.props.gradientMask = JSON.stringify(maskGradient);
     });
   } catch {
     /* not fabric json */

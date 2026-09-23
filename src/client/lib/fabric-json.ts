@@ -2,6 +2,7 @@ import * as fabric from "fabric";
 import { restoreImageCornerRadii, FABRIC_EXTRA_PROPS } from "./image-radius";
 import { isBgImage, restoreLockedBackgrounds } from "./background-image";
 import { restoreStylePresets } from "./style-presets";
+import { restoreObjectGradients } from "./gradient";
 import { restoreElementGroups } from "./element-group";
 import { restoreObjectIdentities } from "./object-identity";
 import { hydratePageBackground } from "./design-images";
@@ -77,6 +78,7 @@ export async function loadFabricJSON(
     await canvas.loadFromJSON(parsed);
     restoreImageCornerRadii(canvas);
     restoreStylePresets(canvas);
+    restoreObjectGradients(canvas);
     restoreElementGroups(canvas);
     restoreObjectIdentities(canvas);
     restoreLockedBackgrounds(canvas);

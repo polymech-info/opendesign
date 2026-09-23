@@ -23,6 +23,7 @@ import {
   readIconStroke,
   readIconStrokeWidth,
 } from "./tabler-icons";
+import { applyObjectGradient } from "./gradient";
 
 export type CopiedShadow = {
   color: string;
@@ -353,6 +354,8 @@ const STYLE_PATCH_KEYS = new Set([
   "_iconFill",
   "_iconName",
   "_iconUrl",
+  "_gradient",
+  "_gradientMask",
   "src",
   "opacity",
   "visible",
@@ -384,6 +387,16 @@ export function applyObjectPatch(obj: fabric.FabricObject, props: Record<string,
   if ("_borderOptions" in next) {
     applyBorderOptions(obj, (next._borderOptions ?? {}) as Partial<BorderOptions>);
     delete next._borderOptions;
+  }
+  if ("_gradient" in next) {
+    const raw = next._gradient;
+    applyObjectGradient(obj, raw, "fill");
+    delete next._gradient;
+    if (raw) delete next.fill;
+  }
+  if ("_gradientMask" in next) {
+    applyObjectGradient(obj, next._gradientMask, "mask");
+    delete next._gradientMask;
   }
   if (isIconObject(obj) && "fill" in next) {
     applyIconFill(obj, String(next.fill ?? ""));

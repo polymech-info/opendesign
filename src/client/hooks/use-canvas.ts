@@ -57,7 +57,6 @@ import {
   pointNearActiveObject,
   resetImageFrame,
 } from "../lib/image-crop";
-import { cssLinearToFabricGradient } from "../lib/fill-presets";
 import { createShapeObject, type ShapeKind } from "../lib/shapes";
 import { api } from "../api";
 import type { LibraryElement } from "../types";
@@ -66,9 +65,14 @@ import {
   lockBackgroundImage,
   pageLayer,
   removePagePhoto,
-  setPageThemeFill,
   stackPageBackgroundLayers,
 } from "../lib/background-image";
+import {
+  applyPageBackgroundColor,
+  applyPageBackgroundGradient,
+  parseCssLinear,
+  type GradientDef,
+} from "../lib/gradient";
 import { patchPageBackgroundInIr, syncImageNodeInIr, syncObjectStyleInIr, syncStackOrderInIr } from "../lib/design-ir-sync";
 import { restackSelection, type StackDirection } from "../lib/layer-stack";
 import { alignSelectionToFirst, matchSelectionSizeToFirst, type AlignEdge, type MatchSizeAxis } from "../lib/align-objects";
@@ -726,15 +730,20 @@ export function useCanvasState() {
   // ── Background ──────────────────────────────────────────────────────
 
   const setBackground = useCallback(
-    (type: "color" | "gradient" | "image", value: string) => {
+    (
+      type: "color" | "gradient" | "image",
+      value: string | GradientDef,
+      opts?: { history?: boolean }
+    ) => {
       const canvas = getActiveCanvas();
       const pageId = activeCanvasIdRef.current;
       if (!canvas || !pageId) return;
+      const commit = opts?.history !== false;
 
       const finish = () => {
         invalidateGlassBackdrop(canvas);
         canvas.requestRenderAll();
-        saveHistory(pageId);
+        if (commit) saveHistory(pageId);
         if (selectedObject && isBgImage(selectedObject)) {
           canvas.discardActiveObject();
           setSelectedObject(null);
@@ -743,10 +752,10 @@ export function useCanvasState() {
       };
 
       if (type === "color") {
+        if (typeof value !== "string") return;
         removePagePhoto(canvas);
         patchPageBackgroundInIr({ clear: true });
-        setPageThemeFill(canvas, value);
-        canvas.backgroundColor = value;
+        applyPageBackgroundColor(canvas, value, canvasWidth, canvasHeight);
         finish();
         return;
       }
@@ -754,12 +763,13 @@ export function useCanvasState() {
       if (type === "gradient") {
         removePagePhoto(canvas);
         patchPageBackgroundInIr({ clear: true });
-        setPageThemeFill(canvas, "transparent");
-        canvas.backgroundColor = cssLinearToFabricGradient(value, canvasWidth, canvasHeight);
+        const def = typeof value === "string" ? parseCssLinear(value) : value;
+        applyPageBackgroundGradient(canvas, def, canvasWidth, canvasHeight);
         finish();
         return;
       }
 
+      if (typeof value !== "string") return;
       fabric.FabricImage.fromURL(value, { crossOrigin: "anonymous" }).then((img) => {
         const scaleX = canvasWidth / (img.width || 1);
         const scaleY = canvasHeight / (img.height || 1);

@@ -55,7 +55,11 @@ export interface EditorContextValue {
   ) => { pageId: string; left: number; top: number; width: number; height: number } | null;
   addImageFromClipboard: (event?: ClipboardEvent, replace?: boolean) => Promise<boolean>;
   replaceSelectedImage: (url: string) => Promise<void>;
-  setBackground: (type: "color" | "gradient" | "image", value: string) => void;
+  setBackground: (
+    type: "color" | "gradient" | "image",
+    value: string | import("./lib/gradient").GradientDef,
+    opts?: { history?: boolean }
+  ) => void;
   lockSelectedAsBackground: () => void;
   updateSelectedObject: (props: Record<string, unknown>) => void;
   copySelectedObjects: () => boolean;

@@ -1,5 +1,22 @@
 # OpenDesign change log
 
+## 2026-09-23
+
+### Shape gradients have a stop editor
+
+- Hover a gradient swatch for a settings cog; it opens the editor.
+- Stops keep color, alpha, and interpolation in sRGB, OKLCH, or HSL.
+- Linear stays a 1D bar. Bezier stores a 2D curve. Cycle and ripple have a movable origin.
+- Apply as fill (with object opacity) or as a visibility mask.
+- Save as new stores a named copy in the local gradient list. Duplicate names get a number.
+- Saved gradients appear at the front of the shape fill palette.
+- A visibility mask composites on its own buffer, so editing no longer grays the rest of the page.
+- Images use the same mask to fade outer pixels. Reopening the editor restores stops, alpha, color, and fill/mask.
+- Sides fade is a preset: left and right ~20% transparent, middle opaque.
+- Gradient dialog is draggable and previews on the canvas. Stops have Reverse.
+- Image clip frames can go thinner; the old 24px / 4% height floor is gone.
+- Clip frames snap to the canvas and to nearby object edges, same as a move.
+
 ## 2026-09-22
 
 ### Properties open with General, Transformation, Reset

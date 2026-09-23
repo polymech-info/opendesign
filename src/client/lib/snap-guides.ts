@@ -327,6 +327,70 @@ export function canvasBoundarySnapsY(outer: Bounds, page: Bounds, tolerance: num
   ].filter((c) => Math.abs(c.delta) <= tolerance);
 }
 
+export type ResizeEdge = "left" | "right" | "top" | "bottom";
+
+export function snapResizeDelta(
+  box: Bounds,
+  edge: ResizeEdge,
+  page: Bounds,
+  others: Bounds[],
+  tolerance = SNAP_TOLERANCE,
+  dir = 0
+): AxisSnap | null {
+  const axis = edge === "left" || edge === "right" ? "x" : "y";
+  const pinned: FeatureKind = edge === "left" || edge === "top" ? "max" : "min";
+  const movers = (axis === "x" ? xFeatures(box) : yFeatures(box)).filter((f) => f.kind !== pinned);
+  const targets = [
+    ...(axis === "x" ? xFeatures(page) : yFeatures(page)),
+    ...others.flatMap(axis === "x" ? xFeatures : yFeatures),
+  ];
+  return snapAxis(movers, targets, tolerance, dir);
+}
+
+export function setSnapGuides(canvas: fabric.Canvas, guides: SnapGuide[]) {
+  guidesByCanvas.set(canvas, guides);
+}
+
+export function snapResizingEdge(
+  canvas: fabric.Canvas,
+  target: fabric.FabricObject,
+  edge: ResizeEdge,
+  evt?: Event | null
+): { dx: number; dy: number } {
+  if ((evt as MouseEvent | undefined)?.altKey) {
+    guidesByCanvas.set(canvas, []);
+    return { dx: 0, dy: 0 };
+  }
+  const drag = noteDragDirection(canvas, evt);
+  const box = sceneBounds(target);
+  const page = pageBounds(canvas);
+  const others = collectTargets(canvas, movingSubtree(target), ancestorSet(target));
+  const dir = edge === "left" || edge === "right" ? drag.dirX : drag.dirY;
+  const hit = snapResizeDelta(box, edge, page, others, SNAP_TOLERANCE, dir);
+  if (!hit) {
+    guidesByCanvas.set(canvas, []);
+    return { dx: 0, dy: 0 };
+  }
+  const dx = edge === "left" || edge === "right" ? hit.delta : 0;
+  const dy = edge === "top" || edge === "bottom" ? hit.delta : 0;
+  guidesByCanvas.set(canvas, [
+    edge === "left" || edge === "right"
+      ? {
+          x1: hit.at,
+          y1: Math.min(hit.moverStart + dy, hit.targetStart),
+          x2: hit.at,
+          y2: Math.max(hit.moverEnd + dy, hit.targetEnd),
+        }
+      : {
+          x1: Math.min(hit.moverStart + dx, hit.targetStart),
+          y1: hit.at,
+          x2: Math.max(hit.moverEnd + dx, hit.targetEnd),
+          y2: hit.at,
+        },
+  ]);
+  return { dx, dy };
+}
+
 function pickAxisSnap(objectSnap: AxisSnap | null, canvasSnap: AxisSnap | null, dir: number) {
   if (canvasSnap && directionScore(canvasSnap.kind, dir) < 0) return canvasSnap;
   if (objectSnap && canvasSnap) {

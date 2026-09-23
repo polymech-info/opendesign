@@ -3,6 +3,7 @@ import * as fabric from "fabric";
 import { useEditor } from "../context";
 import type { Page } from "../types";
 import { loadFabricJSON } from "../lib/fabric-json";
+import { applyResizeCursors } from "../lib/resize-cursor";
 
 interface PageCanvasProps {
   page: Page;
@@ -98,9 +99,11 @@ export function PageCanvas({ page, isActive, width, height }: PageCanvasProps) {
     // Apply custom controls to an object
     const applyCustomControls = (obj: fabric.FabricObject) => {
       if ((obj as { _isBgImage?: boolean })._isBgImage) return;
+      if ((obj as { _id?: string })._id === "canvas.bg") return;
       obj.set(CONTROL_STYLE);
       const lockAspect = !!(obj as { _isIcon?: boolean })._isIcon;
       if (lockAspect) obj.set({ uniformScaling: true, lockScalingFlip: true });
+      applyResizeCursors(obj);
       if (obj.controls) {
         for (const key of ["tl", "tr", "bl", "br"]) {
           if (obj.controls[key]) {
@@ -134,7 +137,13 @@ export function PageCanvas({ page, isActive, width, height }: PageCanvasProps) {
 
     // Apply to any newly added objects
     c.on("object:added", (e) => {
-      if (e.target && !(e.target as { _isBgImage?: boolean })._isBgImage) applyCustomControls(e.target);
+      if (
+        e.target &&
+        !(e.target as { _isBgImage?: boolean })._isBgImage &&
+        (e.target as { _id?: string })._id !== "canvas.bg"
+      ) {
+        applyCustomControls(e.target);
+      }
     });
 
     // Load page content

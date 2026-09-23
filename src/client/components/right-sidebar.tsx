@@ -37,7 +37,7 @@ import { readImageCornerRadius, readCornerRadius } from "../lib/image-radius";
 import { readStylePreset, readGlassOptions, readBorderOptions, newGlassFlareSeed, STYLE_PRESETS, IMAGE_STYLE_PRESETS } from "../lib/style-presets";
 import type { GlassOptions, BorderOptions, BorderKind } from "../lib/style-presets";
 import { isIconObject, readIconFill, readIconStroke, readIconStrokeWidth, iconPreviewUrl } from "../lib/tabler-icons";
-import { selectedCanvasObjects, captureObjectStyle, styleSwatchCss } from "../lib/object-style";
+import { selectedCanvasObjects, captureObjectStyle, styleSwatchCss, applyObjectPatch } from "../lib/object-style";
 import { useSavedStyles, styleFromSaved, CREATE_STYLE_EVENT } from "../hooks/use-saved-styles";
 import type { SavedStyle } from "../types";
 import { stackTargetsFromSelection } from "../lib/layer-stack";
@@ -46,10 +46,27 @@ import { isCroppableImage, readImageCrop, setImageCropOrigin, setImageCropZoom }
 import { isElementGroup, isInsideElementGroup, elementDisplayName } from "../lib/element-group";
 import { isBgImage, pagePhotoSrc } from "../lib/background-image";
 import { readElementSource, readObjectId } from "../lib/object-identity";
-import { FILL_COLORS, GRADIENT_PRESETS, OPACITY_PRESETS, PATTERN_PRESETS, gradientFillForObject, patternFillFromSvg } from "../lib/fill-presets";
+import { FILL_COLORS, GRADIENT_PRESETS, OPACITY_PRESETS, PATTERN_PRESETS, patternFillFromSvg } from "../lib/fill-presets";
+import {
+  GRADIENT_LIBRARY_EVENT,
+  edgeFadeGradient,
+  editorStateForObject,
+  maskFadePresets,
+  loadGradientLibrary,
+  parseCssLinear,
+  readObjectGradient,
+  readObjectGradientMask,
+  withGradientRole,
+  type GradientDef,
+  type GradientRole,
+} from "../lib/gradient";
 import { IconsPanel } from "./icons-panel";
 import { ImagePickerField } from "./image-picker";
+import { BackgroundFillPanel } from "./background-fill";
+import { GradientEditorDialog, GradientPalette, gradientFromCssOrDefault } from "./gradient-editor";
 import { PropSlider } from "./prop-slider";
+
+const GRADIENT_SWATCHES = GRADIENT_PRESETS.map((css) => parseCssLinear(css));
 
 const FONT_FAMILIES = [
   "Inter",
@@ -933,6 +950,53 @@ export function RightSidebar() {
   const canUngroup = isElementGroup(canvas?.getActiveObject() ?? null);
   const canRestack = !!stackTargetsFromSelection(canvas, selectedObject);
   const canAlign = alignableSelection(canvas, selectedObject).length >= 2;
+  const [gradientEdit, setGradientEdit] = useState<{ def: GradientDef; role: GradientRole } | null>(null);
+  const [savedGradients, setSavedGradients] = useState(loadGradientLibrary);
+  const gradientRevertRef = useRef<{
+    fill: GradientDef | null;
+    mask: GradientDef | null;
+    fillPaint?: string;
+  } | null>(null);
+
+  const openGradientEdit = (state: { def: GradientDef; role: GradientRole }) => {
+    if (selectedObject) {
+      gradientRevertRef.current = {
+        fill: readObjectGradient(selectedObject),
+        mask: readObjectGradientMask(selectedObject),
+        fillPaint: typeof selectedObject.fill === "string" ? selectedObject.fill : undefined,
+      };
+    }
+    setGradientEdit(state);
+  };
+
+  const previewGradientEdit = (def: GradientDef, role: GradientRole) => {
+    if (!selectedObject || !canvas) return;
+    const stored = withGradientRole(def, role);
+    applyObjectPatch(selectedObject, role === "mask" ? { _gradientMask: stored } : { _gradient: stored });
+    canvas.requestRenderAll();
+  };
+
+  const revertGradientEdit = () => {
+    const snap = gradientRevertRef.current;
+    if (selectedObject && canvas && snap) {
+      applyObjectPatch(selectedObject, {
+        _gradient: snap.fill,
+        _gradientMask: snap.mask,
+        ...(snap.fill || !snap.fillPaint ? {} : { fill: snap.fillPaint }),
+      });
+      canvas.requestRenderAll();
+    }
+    gradientRevertRef.current = null;
+    setGradientEdit(null);
+  };
+
+  useEffect(() => {
+    const refresh = () => setSavedGradients(loadGradientLibrary());
+    window.addEventListener(GRADIENT_LIBRARY_EVENT, refresh);
+    return () => window.removeEventListener(GRADIENT_LIBRARY_EVENT, refresh);
+  }, []);
+
+  const gradientPalette = [...savedGradients, ...GRADIENT_SWATCHES];
 
   if (!selectedObject || isBg) {
     return (
@@ -964,12 +1028,7 @@ export function RightSidebar() {
             <span class="text-[11px] text-fg-muted">Dimensions</span>
             <span class="text-[11px] text-fg-secondary font-mono">{canvasWidth} x {canvasHeight}</span>
           </div>
-          <label class="text-[11px] text-fg-muted">Background color</label>
-          <input
-            type="color"
-            class="w-full h-8 rounded-md border border-border-mid cursor-pointer bg-transparent"
-            onChange={(e) => setBackground("color", (e.target as HTMLInputElement).value)}
-          />
+          <BackgroundFillPanel />
           <ImagePickerField
             kind="backgrounds"
             currentUrl={pagePhotoSrc(canvas)}
@@ -1278,7 +1337,7 @@ export function RightSidebar() {
           <RotateSkewFields obj={selectedObject} onChange={updateSelectedObject} />
           {isImage && (
             <p class="text-[10px] text-fg-muted m-0">
-              Shift-drag to pan the crop. Shift-drag a corner to zoom inside the frame. Shift-drag a side handle to clip without stretching.
+              Shift-drag to pan the crop. Shift-drag a corner to zoom inside the frame. Shift-drag a side handle to clip without stretching — snaps to the canvas and nearby objects.
             </p>
           )}
           {isImage && isCroppableImage(selectedObject) && (
@@ -1507,7 +1566,10 @@ export function RightSidebar() {
                   class="w-8 h-8 rounded border border-border-mid cursor-pointer bg-transparent shrink-0"
                   value={isIcon ? readIconFill(selectedObject) : ((typeof selectedObject.fill === "string" && selectedObject.fill) || "#6366f1")}
                   onInput={(e) =>
-                    updateSelectedObject({ fill: (e.target as HTMLInputElement).value })
+                    updateSelectedObject({
+                      fill: (e.target as HTMLInputElement).value,
+                      _gradient: null,
+                    })
                   }
                 />
                 <input
@@ -1515,7 +1577,10 @@ export function RightSidebar() {
                   class="flex-1 bg-surface-card border border-border-mid rounded-md text-xs text-fg-secondary px-2 py-1.5 outline-none focus:border-accent font-mono"
                   value={isIcon ? readIconFill(selectedObject) : ((typeof selectedObject.fill === "string" && selectedObject.fill) || "#6366f1")}
                   onInput={(e) =>
-                    updateSelectedObject({ fill: (e.target as HTMLInputElement).value })
+                    updateSelectedObject({
+                      fill: (e.target as HTMLInputElement).value,
+                      _gradient: null,
+                    })
                   }
                 />
               </div>
@@ -1525,25 +1590,48 @@ export function RightSidebar() {
                     key={c}
                     class="aspect-square rounded border border-border-dim cursor-pointer hover:border-accent"
                     style={{ background: c }}
-                    onClick={() => updateSelectedObject({ fill: c })}
+                    onClick={() => updateSelectedObject({ fill: c, _gradient: null })}
                   />
                 ))}
               </div>
               {!isIcon && (
                 <>
                   <p class="text-[10px] text-fg-muted mt-3 mb-1 m-0">Gradients</p>
-                  <div class="grid grid-cols-7 gap-1">
-                    {GRADIENT_PRESETS.map((g) => (
+                  <GradientPalette
+                    obj={selectedObject}
+                    palette={gradientPalette}
+                    defaultRole="fill"
+                    onPick={(def, role) =>
+                      updateSelectedObject(role === "mask" ? { _gradientMask: def } : { _gradient: def })
+                    }
+                    onEdit={openGradientEdit}
+                  />
+                  {readObjectGradient(selectedObject) || readObjectGradientMask(selectedObject) ? (
+                    <div class="flex items-center gap-2 mt-2">
                       <button
-                        key={g}
-                        class="aspect-square rounded border border-border-dim cursor-pointer hover:border-accent"
-                        style={{ background: g }}
+                        type="button"
+                        class="flex-1 px-2 py-1 rounded-md text-[11px] border border-border-dim bg-surface-card text-fg-secondary cursor-pointer hover:border-accent"
                         onClick={() =>
-                          updateSelectedObject({ fill: gradientFillForObject(selectedObject, g) })
+                          openGradientEdit(
+                            editorStateForObject(selectedObject, gradientFromCssOrDefault(), "fill")
+                          )
                         }
-                      />
-                    ))}
-                  </div>
+                      >
+                        Edit fill
+                      </button>
+                      <button
+                        type="button"
+                        class="flex-1 px-2 py-1 rounded-md text-[11px] border border-border-dim bg-surface-card text-fg-secondary cursor-pointer hover:border-accent"
+                        onClick={() =>
+                          openGradientEdit(
+                            editorStateForObject(selectedObject, gradientFromCssOrDefault(), "mask")
+                          )
+                        }
+                      >
+                        {readObjectGradientMask(selectedObject) ? "Edit mask" : "As mask"}
+                      </button>
+                    </div>
+                  ) : null}
                   <p class="text-[10px] text-fg-muted mt-3 mb-1 m-0">Textures</p>
                   <div class="grid grid-cols-6 gap-1">
                     {PATTERN_PRESETS.map((p) => (
@@ -1553,7 +1641,9 @@ export function RightSidebar() {
                         style={{ backgroundImage: `url("data:image/svg+xml;utf8,${encodeURIComponent(p.svg)}")` }}
                         title={p.label}
                         onClick={() => {
-                          void patternFillFromSvg(p.svg).then((fill) => updateSelectedObject({ fill }));
+                          void patternFillFromSvg(p.svg).then((fill) =>
+                            updateSelectedObject({ fill, _gradient: null })
+                          );
                         }}
                       />
                     ))}
@@ -1592,6 +1682,38 @@ export function RightSidebar() {
               <ClipboardPaste size={14} class="text-fg-muted" />
               <span class="text-[11px] text-fg-secondary">Paste to replace</span>
             </button>
+            <div>
+              <p class="text-[10px] text-fg-muted mb-1 mt-1 m-0">Fade / mask</p>
+              <GradientPalette
+                obj={selectedObject}
+                palette={[...maskFadePresets(), ...gradientPalette]}
+                defaultRole="mask"
+                onPick={(def) => updateSelectedObject({ _gradientMask: withGradientRole(def, "mask") })}
+                onEdit={openGradientEdit}
+              />
+              <div class="flex items-center gap-2 mt-2">
+                <button
+                  type="button"
+                  class="flex-1 px-2 py-1 rounded-md text-[11px] border border-border-dim bg-surface-card text-fg-secondary cursor-pointer hover:border-accent"
+                  onClick={() =>
+                    openGradientEdit(
+                      editorStateForObject(selectedObject, edgeFadeGradient(), "mask")
+                    )
+                  }
+                >
+                  {readObjectGradientMask(selectedObject) ? "Edit mask" : "Fade edges"}
+                </button>
+                {readObjectGradientMask(selectedObject) ? (
+                  <button
+                    type="button"
+                    class="px-2 py-1 rounded-md text-[11px] border border-border-dim bg-surface-card text-fg-muted cursor-pointer hover:border-accent hover:text-fg"
+                    onClick={() => updateSelectedObject({ _gradientMask: null })}
+                  >
+                    Clear
+                  </button>
+                ) : null}
+              </div>
+            </div>
           </PanelSection>
         )}
 
@@ -1699,6 +1821,27 @@ export function RightSidebar() {
           <ShadowFields obj={selectedObject} onChange={updateSelectedObject} />
         </PanelSection>
       </div>
+      {gradientEdit && (
+        <GradientEditorDialog
+          key={`${gradientEdit.role}:${gradientEdit.def.id}:${gradientEdit.def.stops.map((s) => `${s.offset}${s.hex}${s.alpha}`).join("|")}`}
+          initial={gradientEdit.def}
+          role={gradientEdit.role}
+          hasMask={!!readObjectGradientMask(selectedObject)}
+          onPreview={previewGradientEdit}
+          onCancel={revertGradientEdit}
+          onClearMask={() => {
+            gradientRevertRef.current = null;
+            updateSelectedObject({ _gradientMask: null });
+            setGradientEdit(null);
+          }}
+          onApply={(def, role) => {
+            gradientRevertRef.current = null;
+            const stored = withGradientRole(def, role);
+            updateSelectedObject(role === "mask" ? { _gradientMask: stored } : { _gradient: stored });
+            setGradientEdit(null);
+          }}
+        />
+      )}
     </aside>
   );
 }

@@ -5,6 +5,7 @@ import {
   canvasBoundarySnapsY,
   chooseDirectedSnap,
   SNAP_TOLERANCE,
+  snapResizeDelta,
 } from "../../src/client/lib/snap-guides.ts";
 
 const page = { left: 0, top: 0, right: 1920, bottom: 1080, cx: 960, cy: 540 };
@@ -27,5 +28,18 @@ assert.equal(chooseDirectedSnap(both, -1)?.kind, "min", "drag left prefers the l
 const nearBottom = { left: 100, top: 880, right: 300, bottom: 1076, cx: 200, cy: 978 };
 const yHits = canvasBoundarySnapsY(nearBottom, page, SNAP_TOLERANCE);
 assert.equal(chooseDirectedSnap(yHits, 1)?.kind, "max");
+
+const clipRight = snapResizeDelta(nearRight, "right", page, [], SNAP_TOLERANCE, 1);
+assert.ok(clipRight && Math.abs(clipRight.delta - 3) < 1e-6, "clip right snaps to canvas");
+const clipLeftPinned = snapResizeDelta(nearRight, "left", page, [], SNAP_TOLERANCE, 1);
+assert.equal(clipLeftPinned, null, "pinned clip edge does not snap to the far canvas side");
+
+const neighbor = { left: 1718, top: 180, right: 1900, bottom: 420, cx: 1809, cy: 300 };
+const clipToObject = snapResizeDelta(nearRight, "left", page, [neighbor], SNAP_TOLERANCE, -1);
+assert.ok(clipToObject && Math.abs(clipToObject.at - 1718) < 1e-6, "clip left snaps to a neighbor left edge");
+
+const nearTop = { left: 80, top: 3, right: 280, bottom: 200, cx: 180, cy: 101.5 };
+const clipTop = snapResizeDelta(nearTop, "top", page, [], SNAP_TOLERANCE, -1);
+assert.ok(clipTop && clipTop.kind === "min" && Math.abs(clipTop.delta + 3) < 1e-6, "clip top snaps to canvas");
 
 console.log("test:snap-guides PASS");
