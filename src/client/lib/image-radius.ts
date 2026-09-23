@@ -23,6 +23,10 @@ export const FABRIC_EXTRA_PROPS = [
   "_sourceH",
   "_gradient",
   "_gradientMask",
+  "_isConnector",
+  "_connector",
+  "_isBalloon",
+  "_balloon",
 ] as const;
 
 type ImageWithRadius = fabric.FabricImage & { _cornerRadius?: number };

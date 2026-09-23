@@ -5,6 +5,7 @@ import {
   canvasBoundarySnapsY,
   chooseDirectedSnap,
   SNAP_TOLERANCE,
+  snapPointToBoxes,
   snapResizeDelta,
 } from "../../src/client/lib/snap-guides.ts";
 
@@ -41,5 +42,12 @@ assert.ok(clipToObject && Math.abs(clipToObject.at - 1718) < 1e-6, "clip left sn
 const nearTop = { left: 80, top: 3, right: 280, bottom: 200, cx: 180, cy: 101.5 };
 const clipTop = snapResizeDelta(nearTop, "top", page, [], SNAP_TOLERANCE, -1);
 assert.ok(clipTop && clipTop.kind === "min" && Math.abs(clipTop.delta + 3) < 1e-6, "clip top snaps to canvas");
+
+const neighborBox = { left: 200, top: 80, right: 280, bottom: 160, cx: 240, cy: 120 };
+const edgeHit = snapPointToBoxes({ x: 203, y: 101 }, [neighborBox], page, SNAP_TOLERANCE);
+assert.ok(
+  edgeHit && Math.abs(edgeHit.point.x - 200) < 1e-6 && Math.abs(edgeHit.point.y - 101) < 1e-6,
+  "point snaps along a neighbor vertical edge"
+);
 
 console.log("test:snap-guides PASS");

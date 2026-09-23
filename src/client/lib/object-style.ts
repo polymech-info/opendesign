@@ -24,6 +24,16 @@ import {
   readIconStrokeWidth,
 } from "./tabler-icons";
 import { applyObjectGradient } from "./gradient";
+import {
+  applyBalloonPatch,
+  applyConnectorPatch,
+  isBalloonObject,
+  isConnectorObject,
+  isMarkupObject,
+  refreshMarkupStyle,
+  type BalloonSpec,
+  type ConnectorSpec,
+} from "./connectors";
 
 export type CopiedShadow = {
   color: string;
@@ -356,6 +366,9 @@ const STYLE_PATCH_KEYS = new Set([
   "_iconUrl",
   "_gradient",
   "_gradientMask",
+  "_connector",
+  "_balloon",
+  "strokeDashArray",
   "src",
   "opacity",
   "visible",
@@ -398,6 +411,14 @@ export function applyObjectPatch(obj: fabric.FabricObject, props: Record<string,
     applyObjectGradient(obj, next._gradientMask, "mask");
     delete next._gradientMask;
   }
+  if ("_connector" in next && isConnectorObject(obj)) {
+    applyConnectorPatch(obj, (next._connector ?? {}) as Partial<ConnectorSpec>);
+    delete next._connector;
+  }
+  if ("_balloon" in next && isBalloonObject(obj)) {
+    applyBalloonPatch(obj, (next._balloon ?? {}) as Partial<BalloonSpec>);
+    delete next._balloon;
+  }
   if (isIconObject(obj) && "fill" in next) {
     applyIconFill(obj, String(next.fill ?? ""));
     delete next.fill;
@@ -417,6 +438,12 @@ export function applyObjectPatch(obj: fabric.FabricObject, props: Record<string,
     next._id = value ? uniqueIfTaken(value, taken) : nextUnique(objectKindSlug(obj), taken);
   }
   obj.set(next as Partial<fabric.FabricObject>);
+  if (
+    isMarkupObject(obj) &&
+    ("stroke" in props || "strokeWidth" in props || "fill" in props || "strokeDashArray" in props)
+  ) {
+    refreshMarkupStyle(obj);
+  }
   applyTextStyleOverrides(obj, next);
   if (usesOverlayPreset(readStylePreset(obj)) && ("fill" in props || "stroke" in props || "strokeWidth" in props)) {
     const styled = obj as fabric.FabricObject & {

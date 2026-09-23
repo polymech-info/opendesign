@@ -10,7 +10,7 @@ export const SNAP_TOLERANCE = 6;
 export const GRID_SNAP_DEBOUNCE_MS = 100;
 const GUIDE_COLOR = "#ec4899";
 
-type Bounds = {
+export type Bounds = {
   left: number;
   top: number;
   right: number;
@@ -18,6 +18,8 @@ type Bounds = {
   cx: number;
   cy: number;
 };
+
+export type ScenePoint = { x: number; y: number };
 
 type FeatureKind = "min" | "mid" | "max";
 
@@ -349,6 +351,126 @@ export function snapResizeDelta(
 
 export function setSnapGuides(canvas: fabric.Canvas, guides: SnapGuide[]) {
   guidesByCanvas.set(canvas, guides);
+}
+
+function dist2(a: ScenePoint, b: ScenePoint) {
+  const dx = a.x - b.x;
+  const dy = a.y - b.y;
+  return dx * dx + dy * dy;
+}
+
+function projectOnSeg(p: ScenePoint, a: ScenePoint, b: ScenePoint): ScenePoint {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len2 = dx * dx + dy * dy;
+  if (len2 < 1e-8) return { x: a.x, y: a.y };
+  const t = Math.min(1, Math.max(0, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2));
+  return { x: a.x + dx * t, y: a.y + dy * t };
+}
+
+function boxAnchors(box: Bounds): { point: ScenePoint; guides: SnapGuide[] }[] {
+  const corners: ScenePoint[] = [
+    { x: box.left, y: box.top },
+    { x: box.right, y: box.top },
+    { x: box.right, y: box.bottom },
+    { x: box.left, y: box.bottom },
+  ];
+  const mids: ScenePoint[] = [
+    { x: box.cx, y: box.top },
+    { x: box.cx, y: box.bottom },
+    { x: box.left, y: box.cy },
+    { x: box.right, y: box.cy },
+  ];
+  const edges: [ScenePoint, ScenePoint][] = [
+    [corners[0], corners[1]],
+    [corners[1], corners[2]],
+    [corners[2], corners[3]],
+    [corners[3], corners[0]],
+  ];
+  const out: { point: ScenePoint; guides: SnapGuide[] }[] = [];
+  for (const p of [...corners, ...mids]) {
+    out.push({
+      point: p,
+      guides: [
+        { x1: box.left, y1: p.y, x2: box.right, y2: p.y },
+        { x1: p.x, y1: box.top, x2: p.x, y2: box.bottom },
+      ],
+    });
+  }
+  for (const [a, b] of edges) {
+    const horiz = Math.abs(a.y - b.y) < 1e-6;
+    out.push({
+      point: a,
+      guides: horiz
+        ? [{ x1: Math.min(a.x, b.x), y1: a.y, x2: Math.max(a.x, b.x), y2: a.y }]
+        : [{ x1: a.x, y1: Math.min(a.y, b.y), x2: a.x, y2: Math.max(a.y, b.y) }],
+    });
+  }
+  return out;
+}
+
+/** Snap a free point to nearby object/page corners, edge midpoints, or along edges. */
+export function snapPointToBoxes(
+  point: ScenePoint,
+  boxes: Bounds[],
+  page?: Bounds | null,
+  tolerance = SNAP_TOLERANCE
+): { point: ScenePoint; guides: SnapGuide[] } | null {
+  const limit = tolerance * tolerance;
+  let best: { point: ScenePoint; guides: SnapGuide[]; d: number } | null = null;
+  const consider = (candidate: ScenePoint, guides: SnapGuide[]) => {
+    const d = dist2(point, candidate);
+    if (d > limit) return;
+    if (!best || d < best.d) best = { point: candidate, guides, d };
+  };
+  const all = page ? [page, ...boxes] : boxes;
+  for (const box of all) {
+    for (const hit of boxAnchors(box)) consider(hit.point, hit.guides);
+  }
+  if (best) return { point: best.point, guides: best.guides };
+  for (const box of all) {
+    const corners: ScenePoint[] = [
+      { x: box.left, y: box.top },
+      { x: box.right, y: box.top },
+      { x: box.right, y: box.bottom },
+      { x: box.left, y: box.bottom },
+    ];
+    const edges: [ScenePoint, ScenePoint][] = [
+      [corners[0], corners[1]],
+      [corners[1], corners[2]],
+      [corners[2], corners[3]],
+      [corners[3], corners[0]],
+    ];
+    for (const [a, b] of edges) {
+      const proj = projectOnSeg(point, a, b);
+      const horiz = Math.abs(a.y - b.y) < 1e-6;
+      consider(proj, [
+        horiz
+          ? { x1: Math.min(a.x, b.x), y1: a.y, x2: Math.max(a.x, b.x), y2: a.y }
+          : { x1: a.x, y1: Math.min(a.y, b.y), x2: a.x, y2: Math.max(a.y, b.y) },
+      ]);
+    }
+  }
+  return best ? { point: best.point, guides: best.guides } : null;
+}
+
+export function neighborBounds(canvas: fabric.Canvas, skip: fabric.FabricObject): Bounds[] {
+  return collectTargets(canvas, movingSubtree(skip), ancestorSet(skip));
+}
+
+export function snapScenePoint(
+  canvas: fabric.Canvas,
+  point: ScenePoint,
+  skip: fabric.FabricObject,
+  evt?: Event | null
+): ScenePoint {
+  if ((evt as MouseEvent | undefined)?.altKey) {
+    setSnapGuides(canvas, []);
+    return point;
+  }
+  const hit = snapPointToBoxes(point, neighborBounds(canvas, skip), pageBounds(canvas));
+  setSnapGuides(canvas, hit?.guides ?? []);
+  return hit?.point ?? point;
 }
 
 export function snapResizingEdge(

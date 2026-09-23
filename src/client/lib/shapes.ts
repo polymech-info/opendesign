@@ -1,5 +1,6 @@
 import * as fabric from "fabric";
 import { applyCornerRadius } from "./image-radius";
+import { createBalloon, createConnector } from "./connectors";
 
 export type ShapeKind =
   | "rect"
@@ -11,7 +12,13 @@ export type ShapeKind =
   | "hexagon"
   | "star"
   | "arrow"
-  | "line";
+  | "line"
+  | "connector"
+  | "connector-arrow"
+  | "connector-elbow"
+  | "connector-curve"
+  | "balloon"
+  | "balloon-thought";
 
 const SHAPE_DEFAULTS = {
   fill: "#6366f1",
@@ -136,6 +143,18 @@ export function createShapeObject(type: ShapeKind, canvasWidth: number, canvasHe
         strokeWidth: 3,
         fill: "",
       });
+    case "connector":
+      return createConnector("line", canvasWidth, canvasHeight);
+    case "connector-arrow":
+      return createConnector("arrow", canvasWidth, canvasHeight);
+    case "connector-elbow":
+      return createConnector("elbow", canvasWidth, canvasHeight);
+    case "connector-curve":
+      return createConnector("curve", canvasWidth, canvasHeight);
+    case "balloon":
+      return createBalloon("speech", canvasWidth, canvasHeight);
+    case "balloon-thought":
+      return createBalloon("thought", canvasWidth, canvasHeight);
     default:
       return null;
   }

@@ -31,6 +31,8 @@ export function objectKindSlug(obj: fabric.FabricObject): string {
   if (obj instanceof fabric.Textbox || obj instanceof fabric.IText) return "text";
   if (obj instanceof fabric.Circle) return "circle";
   if (obj instanceof fabric.Triangle) return "triangle";
+  if ((obj as { _isConnector?: boolean })._isConnector) return "arrow";
+  if ((obj as { _isBalloon?: boolean })._isBalloon) return "balloon";
   if (obj instanceof fabric.Line) return "line";
   if (obj instanceof fabric.Rect) return "rect";
   return (obj.type || "object").toString().toLowerCase();

@@ -20,6 +20,10 @@ import {
   Star,
   ArrowRight,
   RectangleHorizontal,
+  CornerDownRight,
+  Spline,
+  MessageSquare,
+  Cloud,
 } from "lucide-preact";
 import { useEditor } from "../context";
 import { TemplateCard } from "./template-card";
@@ -71,8 +75,19 @@ const SHAPE_BUTTONS: { type: ShapeKind; icon: typeof Square; label: string }[] =
   { type: "diamond", icon: Diamond, label: "Diamond" },
   { type: "hexagon", icon: Hexagon, label: "Hexagon" },
   { type: "star", icon: Star, label: "Star" },
-  { type: "arrow", icon: ArrowRight, label: "Arrow" },
-  { type: "line", icon: Minus, label: "Line" },
+  { type: "arrow", icon: ArrowRight, label: "Chevron" },
+];
+
+const LINE_BUTTONS: { type: ShapeKind; icon: typeof Square; label: string }[] = [
+  { type: "connector", icon: Minus, label: "Line" },
+  { type: "connector-arrow", icon: ArrowRight, label: "Arrow" },
+  { type: "connector-elbow", icon: CornerDownRight, label: "Elbow" },
+  { type: "connector-curve", icon: Spline, label: "Curve" },
+];
+
+const BALLOON_BUTTONS: { type: ShapeKind; icon: typeof Square; label: string }[] = [
+  { type: "balloon", icon: MessageSquare, label: "Speech" },
+  { type: "balloon-thought", icon: Cloud, label: "Thought" },
 ];
 
 export function LeftSidebar() {
@@ -194,6 +209,33 @@ export function LeftSidebar() {
                     <p class="text-fg-muted text-[11px] mb-2">Click to add a shape</p>
                     <div class="grid grid-cols-2 gap-2">
                       {SHAPE_BUTTONS.map((s) => (
+                        <button
+                          key={s.type}
+                          class="flex flex-col items-center gap-1.5 p-3 rounded-lg bg-surface-card border border-border-dim cursor-pointer transition-all hover:border-accent hover:bg-accent/5"
+                          onClick={() => addShape(s.type)}
+                        >
+                          <s.icon size={24} class="text-fg-muted" />
+                          <span class="text-[11px] text-fg-muted">{s.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                    <p class="text-fg-muted text-[11px] mb-2 mt-4">Lines & arrows</p>
+                    <p class="text-[10px] text-fg-muted mb-2 m-0">Drag the handles. Endpoints snap to nearby corners and edges.</p>
+                    <div class="grid grid-cols-2 gap-2">
+                      {LINE_BUTTONS.map((s) => (
+                        <button
+                          key={s.type}
+                          class="flex flex-col items-center gap-1.5 p-3 rounded-lg bg-surface-card border border-border-dim cursor-pointer transition-all hover:border-accent hover:bg-accent/5"
+                          onClick={() => addShape(s.type)}
+                        >
+                          <s.icon size={24} class="text-fg-muted" />
+                          <span class="text-[11px] text-fg-muted">{s.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                    <p class="text-fg-muted text-[11px] mb-2 mt-4">Balloons</p>
+                    <div class="grid grid-cols-2 gap-2">
+                      {BALLOON_BUTTONS.map((s) => (
                         <button
                           key={s.type}
                           class="flex flex-col items-center gap-1.5 p-3 rounded-lg bg-surface-card border border-border-dim cursor-pointer transition-all hover:border-accent hover:bg-accent/5"

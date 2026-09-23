@@ -45,6 +45,18 @@ import { alignableSelection } from "../lib/align-objects";
 import { isCroppableImage, readImageCrop, setImageCropOrigin, setImageCropZoom } from "../lib/image-crop";
 import { isElementGroup, isInsideElementGroup, elementDisplayName } from "../lib/element-group";
 import { isBgImage, pagePhotoSrc } from "../lib/background-image";
+import {
+  LINE_DASHES,
+  LINE_HEADS,
+  isBalloonObject,
+  isConnectorObject,
+  readBalloon,
+  readConnector,
+  type BalloonKind,
+  type ConnectorKind,
+  type LineDash,
+  type LineHead,
+} from "../lib/connectors";
 import { readElementSource, readObjectId } from "../lib/object-identity";
 import { FILL_COLORS, GRADIENT_PRESETS, OPACITY_PRESETS, PATTERN_PRESETS, patternFillFromSvg } from "../lib/fill-presets";
 import {
@@ -942,7 +954,9 @@ export function RightSidebar() {
   const isIcon = isIconObject(selectedObject);
   const isGroup = isElementGroup(selectedObject);
   const isInner = isInsideElementGroup(selectedObject);
-  const isShape = selectedObject && !isText && !isImage && !isGroup && !isBg;
+  const isConnector = isConnectorObject(selectedObject);
+  const isBalloon = isBalloonObject(selectedObject);
+  const isShape = selectedObject && !isText && !isImage && !isGroup && !isBg && !isConnector;
   const isGlass = selectedObject ? readStylePreset(selectedObject) === "glass" : false;
   const isBorder = selectedObject ? readStylePreset(selectedObject) === "border" : false;
   const selectedCount = selectedCanvasObjects(canvas, selectedObject).length;
@@ -1516,8 +1530,123 @@ export function RightSidebar() {
           </PanelSection>
         )}
 
+        {isConnector && selectedObject && (
+          <PanelSection title="Line">
+            <div class="flex gap-1 mb-2">
+              {(["line", "arrow", "elbow", "curve"] as ConnectorKind[]).map((kind) => (
+                <button
+                  key={kind}
+                  type="button"
+                  class={`flex-1 py-1 rounded border text-[10px] capitalize cursor-pointer ${
+                    readConnector(selectedObject)?.kind === kind
+                      ? "border-accent bg-accent/10 text-fg"
+                      : "border-border-dim bg-surface-card text-fg-muted hover:border-accent"
+                  }`}
+                  onClick={() => updateSelectedObject({ _connector: { kind } })}
+                >
+                  {kind}
+                </button>
+              ))}
+            </div>
+            <label class="text-[11px] text-fg-muted mb-1 block">Stroke</label>
+            <div class="flex items-center gap-2 mb-2">
+              <input
+                type="color"
+                class="w-8 h-8 rounded border border-border-mid cursor-pointer bg-transparent shrink-0"
+                value={(selectedObject.stroke as string) || "#334155"}
+                onInput={(e) =>
+                  updateSelectedObject({
+                    stroke: (e.target as HTMLInputElement).value,
+                    fill: (e.target as HTMLInputElement).value,
+                  })
+                }
+              />
+              <input
+                type="number"
+                class="w-16 bg-surface-card border border-border-mid rounded-md text-xs text-fg-secondary px-2 py-1.5 outline-none focus:border-accent"
+                value={selectedObject.strokeWidth || 3}
+                min={1}
+                onInput={(e) =>
+                  updateSelectedObject({
+                    strokeWidth: Math.max(1, parseFloat((e.target as HTMLInputElement).value) || 1),
+                  })
+                }
+              />
+            </div>
+            <label class="text-[11px] text-fg-muted mb-1 block">Dash</label>
+            <div class="flex gap-1 mb-2">
+              {LINE_DASHES.map((d) => (
+                <button
+                  key={d.id}
+                  type="button"
+                  class={`flex-1 py-1 rounded border text-[10px] cursor-pointer ${
+                    readConnector(selectedObject)?.dash === d.id
+                      ? "border-accent bg-accent/10 text-fg"
+                      : "border-border-dim bg-surface-card text-fg-muted hover:border-accent"
+                  }`}
+                  onClick={() => updateSelectedObject({ _connector: { dash: d.id as LineDash } })}
+                >
+                  {d.label}
+                </button>
+              ))}
+            </div>
+            <label class="text-[11px] text-fg-muted mb-1 block">Start</label>
+            <div class="grid grid-cols-5 gap-1 mb-2">
+              {LINE_HEADS.map((h) => (
+                <button
+                  key={`s-${h.id}`}
+                  type="button"
+                  class={`py-1 rounded border text-[9px] cursor-pointer ${
+                    readConnector(selectedObject)?.startHead === h.id
+                      ? "border-accent bg-accent/10 text-fg"
+                      : "border-border-dim bg-surface-card text-fg-muted hover:border-accent"
+                  }`}
+                  onClick={() => updateSelectedObject({ _connector: { startHead: h.id as LineHead } })}
+                >
+                  {h.label}
+                </button>
+              ))}
+            </div>
+            <label class="text-[11px] text-fg-muted mb-1 block">End</label>
+            <div class="grid grid-cols-5 gap-1">
+              {LINE_HEADS.map((h) => (
+                <button
+                  key={`e-${h.id}`}
+                  type="button"
+                  class={`py-1 rounded border text-[9px] cursor-pointer ${
+                    readConnector(selectedObject)?.endHead === h.id
+                      ? "border-accent bg-accent/10 text-fg"
+                      : "border-border-dim bg-surface-card text-fg-muted hover:border-accent"
+                  }`}
+                  onClick={() => updateSelectedObject({ _connector: { endHead: h.id as LineHead } })}
+                >
+                  {h.label}
+                </button>
+              ))}
+            </div>
+          </PanelSection>
+        )}
+
         {isShape && (
-          <PanelSection title={isIcon ? "Icon" : "Shape"}>
+          <PanelSection title={isIcon ? "Icon" : isBalloon ? "Balloon" : "Shape"}>
+            {isBalloon && selectedObject && (
+              <div class="flex gap-1 mb-2">
+                {(["speech", "thought"] as BalloonKind[]).map((kind) => (
+                  <button
+                    key={kind}
+                    type="button"
+                    class={`flex-1 py-1 rounded border text-[10px] capitalize cursor-pointer ${
+                      readBalloon(selectedObject)?.kind === kind
+                        ? "border-accent bg-accent/10 text-fg"
+                        : "border-border-dim bg-surface-card text-fg-muted hover:border-accent"
+                    }`}
+                    onClick={() => updateSelectedObject({ _balloon: { kind } })}
+                  >
+                    {kind}
+                  </button>
+                ))}
+              </div>
+            )}
             {isIcon && (
               <div>
                 <label class="text-[11px] text-fg-muted mb-1 block">Icon</label>

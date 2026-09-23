@@ -28,6 +28,8 @@
     "test:llm-ensure": "tsx tests/design/test-llm-ensure.ts",
     "test:glass-flares": "tsx tests/design/test-glass-flares.ts",
     "test:gradients": "tsx tests/design/test-gradients.ts",
+    "test:connectors": "tsx tests/design/test-connectors.ts",
+    "test:snap-guides": "tsx tests/design/test-snap-guides.ts",
     "test:design": "tsx tests/design/test-design-dsl.ts",
     "test:agent-tools": "tsx tests/design/test-agent-tools.ts",
     "test:design:llm": "tsx tests/design/test-design-llm.ts",

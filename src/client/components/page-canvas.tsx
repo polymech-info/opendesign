@@ -4,6 +4,7 @@ import { useEditor } from "../context";
 import type { Page } from "../types";
 import { loadFabricJSON } from "../lib/fabric-json";
 import { applyResizeCursors } from "../lib/resize-cursor";
+import { decorateMarkupObject, isConnectorObject } from "../lib/connectors";
 
 interface PageCanvasProps {
   page: Page;
@@ -101,6 +102,10 @@ export function PageCanvas({ page, isActive, width, height }: PageCanvasProps) {
       if ((obj as { _isBgImage?: boolean })._isBgImage) return;
       if ((obj as { _id?: string })._id === "canvas.bg") return;
       obj.set(CONTROL_STYLE);
+      if (isConnectorObject(obj)) {
+        decorateMarkupObject(obj);
+        return;
+      }
       const lockAspect = !!(obj as { _isIcon?: boolean })._isIcon;
       if (lockAspect) obj.set({ uniformScaling: true, lockScalingFlip: true });
       applyResizeCursors(obj);
@@ -130,6 +135,7 @@ export function PageCanvas({ page, isActive, width, height }: PageCanvasProps) {
           }
         }
       }
+      decorateMarkupObject(obj);
     };
 
     // Apply to all existing objects
