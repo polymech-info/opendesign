@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Open-Source Canvas Editor for Design Stills | Polymech</title>
+    <meta
+      name="description"
+      content="Open-source canvas editor for app-store screenshots and other design stills. Compose type, shapes, and images in the browser. Designs stay on this device."
+    />
+    <link rel="canonical" href="https://polymech.info/apps/opendesign/" />
+    <meta name="robots" content="index, follow" />
+    <meta name="theme-color" content="#ffffff" />
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:site_name" content="Polymech" />
+    <meta property="og:title" content="Open-Source Canvas Editor for Design Stills | Polymech" />
+    <meta
+      property="og:description"
+      content="Open-source canvas editor for app-store screenshots and other design stills. Compose type, shapes, and images in the browser. Designs stay on this device."
+    />
+    <meta property="og:url" content="https://polymech.info/apps/opendesign/" />
+    <meta property="og:image" content="https://polymech.info/Color%20logo%20-%20no%20background.png" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Open-Source Canvas Editor for Design Stills | Polymech" />
+    <meta
+      name="twitter:description"
+      content="Open-source canvas editor for app-store screenshots and other design stills. Compose type, shapes, and images in the browser. Designs stay on this device."
+    />
+    <meta name="twitter:image" content="https://polymech.info/Color%20logo%20-%20no%20background.png" />
+    <link rel="icon" href="https://polymech.info/favicon.ico" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "SoftwareApplication",
+            "name": "OpenDesign",
+            "applicationCategory": "DesignApplication",
+            "operatingSystem": "Web",
+            "url": "https://polymech.info/apps/opendesign/",
+            "description": "Open-source canvas editor for app-store screenshots and other design stills. Compose type, shapes, and images in the browser. Designs stay on this device.",
+            "offers": {
+              "@type": "Offer",
+              "price": "0",
+              "priceCurrency": "USD"
+            },
+            "publisher": {
+              "@type": "Organization",
+              "name": "Polymech",
+              "url": "https://polymech.info/en/"
+            }
+          },
+          {
+            "@type": "BreadcrumbList",
+            "itemListElement": [
+              {
+                "@type": "ListItem",
+                "position": 1,
+                "name": "Polymech",
+                "item": "https://polymech.info/en/"
+              },
+              {
+                "@type": "ListItem",
+                "position": 2,
+                "name": "OpenDesign",
+                "item": "https://polymech.info/apps/opendesign/"
+              }
+            ]
+          }
+        ]
+      }
+    </script>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #ffffff;
+        --line: #e2e6e3;
+        --ink: #1c211e;
+        --muted: #5c6560;
+        --amber: #e8a317;
+        --amber-ink: #1a1408;
+        --link: #8a4b08;
+      }
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "Segoe UI", system-ui, sans-serif;
+        font-size: 17px;
+        line-height: 1.55;
+        color: var(--ink);
+        background: var(--bg);
+      }
+      a { color: var(--link); text-underline-offset: 3px; }
+      a:hover { color: #5c3204; }
+      .wrap { width: min(1080px, calc(100% - 32px)); margin: 0 auto; }
+      .crumb {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        margin: 0;
+        padding: 22px 0 8px;
+        color: var(--muted);
+        font-size: 13px;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+      .crumb a { color: var(--muted); text-decoration: none; }
+      .crumb a:hover { color: var(--ink); }
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr);
+        gap: 36px;
+        align-items: start;
+        padding: 18px 0 28px;
+      }
+      h1 {
+        margin: 0 0 14px;
+        font-size: clamp(2rem, 4vw, 3.15rem);
+        line-height: 1.05;
+        letter-spacing: -0.03em;
+        font-weight: 650;
+      }
+      .lede { margin: 0 0 22px; max-width: 40rem; color: #2a312d; }
+      .actions { display: flex; flex-wrap: wrap; gap: 12px; margin: 0 0 8px; }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        min-height: 44px;
+        padding: 10px 16px;
+        border-radius: 6px;
+        text-decoration: none;
+        font-weight: 650;
+      }
+      .btn-go { background: var(--amber); color: var(--amber-ink); }
+      .btn-go:hover { background: #ffd36a; color: var(--amber-ink); }
+      .btn-src { border: 1px solid #c9d0cb; color: var(--ink); background: #fff; }
+      .btn-src:hover { border-color: var(--amber); color: var(--ink); }
+      .tape {
+        margin: 0;
+        padding: 14px 14px 16px;
+        background: #f7f8f6;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        box-shadow: 0 12px 32px rgba(28, 33, 30, 0.06);
+        font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+        font-size: 13px;
+        line-height: 1.65;
+        overflow: auto;
+      }
+      .tape figcaption {
+        margin: 0 0 10px;
+        color: var(--muted);
+        font-family: "Segoe UI", system-ui, sans-serif;
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .tape ol { list-style: none; margin: 0; padding: 0; }
+      .tape li { display: grid; grid-template-columns: 2.2rem 1fr; gap: 8px; }
+      .tape .n { color: #8b948e; text-align: right; }
+      main { padding-bottom: 48px; }
+      section { padding: 8px 0 22px; border-top: 1px solid var(--line); }
+      h2 { margin: 22px 0 8px; font-size: 1.35rem; letter-spacing: -0.02em; }
+      h3 { margin: 18px 0 6px; font-size: 1.05rem; }
+      p { max-width: 44rem; }
+      footer {
+        border-top: 1px solid var(--line);
+        padding: 18px 0 32px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+      @media (max-width: 800px) {
+        .hero { grid-template-columns: 1fr; gap: 22px; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <nav aria-label="Breadcrumb">
+        <p class="crumb">
+          <a href="https://polymech.info/en/">Polymech</a>
+          <span aria-hidden="true">/</span>
+          <span>OpenDesign</span>
+        </p>
+      </nav>
+      <header class="hero">
+        <div>
+          <h1>Open-source canvas editor for design stills</h1>
+          <p class="lede">
+            Polymech publishes OpenDesign for app-store screenshots and other fixed-size stills. Open a canvas in the browser, place type and shapes, and download a PNG. The design stays on this device.
+          </p>
+          <p class="actions">
+            <a class="btn btn-go" href="./app/">Open the editor</a>
+            <a class="btn btn-src" href="https://github.com/polymech-info/opendesign">OpenDesign source on GitHub</a>
+          </p>
+        </div>
+        <figure class="tape">
+          <figcaption>Design still, 1920 × 1080</figcaption>
+          <ol>
+            <li><span class="n">1</span><span>canvas main 1920 1080</span></li>
+            <li><span class="n">2</span><span>txt title x=80 y=72</span></li>
+            <li><span class="n">3</span><span>shape card x=80 y=160 w=420 h=220</span></li>
+          </ol>
+        </figure>
+      </header>
+      <main>
+        <section aria-labelledby="edit">
+          <h2 id="edit">Compose a still</h2>
+          <p>
+            The canvas is a fixed page, the size of a store screenshot or a feature card. Add headings, body text, rectangles, circles, and lines. Drop an image onto the page and it is stored with the design. Undo, layers, and snap guides are in the editor.
+          </p>
+          <h3>Pages and versions</h3>
+          <p>
+            A design can hold more than one page. Saving keeps an autosave you can restore from the versions list. PNG and JSON both download in the browser.
+          </p>
+          <h3>Starter designs</h3>
+          <p>
+            The first visit creates Quote Card and Stats Highlight in this browser, and the template list includes those layouts. Creating from a template makes a new design and leaves the one you have open alone.
+          </p>
+        </section>
+        <section aria-labelledby="local">
+          <h2 id="local">Designs stay in this browser</h2>
+          <p>
+            Designs and uploaded images are saved in the browser’s private file storage for this site. Nothing from the canvas is uploaded to Polymech. The next visit on the same browser still has them. Another browser, or a private window that blocks that storage, starts again from the two starter designs.
+          </p>
+        </section>
+        <section aria-labelledby="local-app">
+          <h2 id="local-app">The hosted editor and the local app</h2>
+          <p>
+            This page runs the canvas in the browser. Chat, the icon library, and saving a PNG into a project folder belong to the local app,
+            <code>pm-opendesign</code>, which stores designs in a folder on your machine.
+          </p>
+        </section>
+        <section aria-labelledby="source">
+          <h2 id="source">Source</h2>
+          <p>
+            The editor is MIT licensed in the
+            <a href="https://github.com/polymech-info/opendesign">OpenDesign repository on GitHub</a>.
+            It is part of the open-source tools Polymech publishes while building manufacturing software.
+          </p>
+        </section>
+      </main>
+      <footer>
+        <a href="https://polymech.info/en/">Polymech</a>
+        ·
+        <a href="./app/">Open the editor</a>
+        ·
+        <a href="https://github.com/polymech-info/opendesign">GitHub</a>
+      </footer>
+    </div>
+  </body>
+</html>

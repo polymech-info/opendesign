@@ -26,6 +26,7 @@ import {
   Cloud,
 } from "lucide-preact";
 import { useEditor } from "../context";
+import { features } from "../mode";
 import { TemplateCard } from "./template-card";
 import { DesignList } from "./design-list";
 import { VersionsPanel } from "./versions-panel";
@@ -85,6 +86,10 @@ const LINE_BUTTONS: { type: ShapeKind; icon: typeof Square; label: string }[] = 
   { type: "connector-curve", icon: Spline, label: "Curve" },
 ];
 
+const sections = SECTIONS.filter(
+  (section) => (features.chat || section.key !== "chat") && (features.icons || section.key !== "icons"),
+);
+
 const BALLOON_BUTTONS: { type: ShapeKind; icon: typeof Square; label: string }[] = [
   { type: "balloon", icon: MessageSquare, label: "Speech" },
   { type: "balloon-thought", icon: Cloud, label: "Thought" },
@@ -93,7 +98,8 @@ const BALLOON_BUTTONS: { type: ShapeKind; icon: typeof Square; label: string }[]
 export function LeftSidebar() {
   const { addText, addShape, addIcon, addImage, addImageFromClipboard, addLibraryElement, setBackground, templates, createFromTemplate, navigate, canvas } = useEditor();
   const designId = useRouteDesignId();
-  const activeSection = useRoutePanel();
+  const routed = useRoutePanel();
+  const activeSection = sections.some((section) => section.key === routed) ? routed : null;
 
   const handleSectionClick = (key: Section) => {
     if (!designId) return;
@@ -108,7 +114,7 @@ export function LeftSidebar() {
     <aside class="flex flex-row shrink-0">
       {/* Icon Rail */}
       <div class="w-[70px] bg-surface-card border-r border-border-dim flex flex-col items-center pt-2 gap-0.5 shrink-0 overflow-y-auto">
-        {SECTIONS.map((s) => (
+        {sections.map((s) => (
           <button
             key={s.key}
             class={`flex flex-col items-center justify-center gap-0.5 w-[56px] h-[56px] rounded-lg bg-transparent border-none cursor-pointer transition-all ${
@@ -130,9 +136,11 @@ export function LeftSidebar() {
         style={{ width: isOpen ? `${panelWidth}px` : "0px" }}
       >
         <div class="h-full" style={{ width: `${panelWidth}px` }}>
-          <div class={`h-full min-h-0 ${isChat ? "flex flex-col" : "hidden"}`} style={{ width: "360px" }}>
-            <ChatPanel />
-          </div>
+          {features.chat && (
+            <div class={`h-full min-h-0 ${isChat ? "flex flex-col" : "hidden"}`} style={{ width: "360px" }}>
+              <ChatPanel />
+            </div>
+          )}
           {activeSection && activeSection !== "chat" && (
             <div class="h-full flex flex-col" style={{ width: "240px" }}>
               <div class="px-3 pt-3 pb-2 shrink-0">
@@ -260,7 +268,7 @@ export function LeftSidebar() {
                   </div>
                 )}
 
-                {activeSection === "icons" && (
+                {features.icons && activeSection === "icons" && (
                   <div>
                     <p class="text-fg-muted text-[11px] mb-2">Local: click to place. Iconify: double-click to download to uploads/icons/ and place.</p>
                     <IconsPanel onPick={(pick) => void addIcon(pick)} />

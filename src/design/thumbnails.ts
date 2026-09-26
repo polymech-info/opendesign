@@ -12,7 +12,7 @@ export function designNeedsThumbnail(design: ThumbnailDesign): boolean {
 
 export function thumbnailCacheSrc(url: string | null | undefined, version?: string | null): string {
   if (!url) return "";
-  if (!version) return url;
+  if (!version || url.startsWith("data:") || url.startsWith("blob:")) return url;
   const join = url.includes("?") ? "&" : "?";
   return `${url}${join}v=${encodeURIComponent(version)}`;
 }

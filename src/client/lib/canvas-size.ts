@@ -14,6 +14,7 @@ export const CANVAS_SIZES: CanvasSize[] = [
   { label: "LinkedIn Landscape", width: 1200, height: 627 },
   { label: "LinkedIn Portrait", width: 1200, height: 1500 },
   { label: "Instagram Story", width: 1080, height: 1920 },
+  { label: "9:16 Poster art", width: 720, height: 1080 },
   { label: "Phone", width: 390, height: 844 },
   { label: "A4", width: 794, height: 1123 },
 ];

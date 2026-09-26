@@ -26,6 +26,7 @@ import { isElementGroup } from "../lib/element-group";
 import { selectedCanvasObjects } from "../lib/object-style";
 import { stackTargetsFromSelection } from "../lib/layer-stack";
 import { saveAppScreenshot } from "../lib/capture-app";
+import { features } from "../mode";
 import { ThemeToggle } from "./theme-toggle";
 import { editorHref } from "../lib/editor-path";
 import { useRoutePanel } from "../hooks/use-app-navigate";
@@ -370,7 +371,7 @@ export function Toolbar({
           class="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-semibold border border-border-mid cursor-pointer transition-all bg-transparent text-fg-secondary hover:bg-surface-hover hover:text-fg"
           onClick={(e) => {
             const name = activeDesign?.name;
-            if (e.shiftKey) {
+            if (features.projectExport && e.shiftKey) {
               e.preventDefault();
               void exportPNG({ toProject: true, name }).then((written) => {
                 if (written?.relative) flashNotice(written.relative);
@@ -379,7 +380,7 @@ export function Toolbar({
             }
             void exportPNG({ name });
           }}
-          title="Export as PNG. Shift-click saves to .OpenDesign/designs/title_n.png"
+          title={features.projectExport ? "Export as PNG. Shift-click saves to .OpenDesign/designs/title_n.png" : "Export as PNG"}
         >
           <Download size={13} />
           PNG
@@ -401,21 +402,23 @@ export function Toolbar({
           {saving ? <span class="spinner !border-white/30 !border-t-white" /> : <Save size={13} />}
           {saving ? "Saving..." : "Save"}
         </button>
-        <button
-          class="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-semibold border border-border-mid cursor-pointer transition-all bg-transparent text-fg-secondary hover:bg-surface-hover hover:text-fg disabled:opacity-50 disabled:cursor-not-allowed"
-          disabled={capturingApp}
-          onClick={() => {
-            setCapturingApp(true);
-            void saveAppScreenshot()
-              .then((written) => flashNotice(written.relative))
-              .catch((e) => flashNotice(e instanceof Error ? e.message : "Could not save screenshot"))
-              .finally(() => setCapturingApp(false));
-          }}
-          title="Capture the visible Chrome tab via Tanit Inspector → docs/assets/screenshot_n.png"
-        >
-          <Camera size={13} />
-          {capturingApp ? "Capturing..." : "Shot"}
-        </button>
+        {features.appShot && (
+          <button
+            class="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-semibold border border-border-mid cursor-pointer transition-all bg-transparent text-fg-secondary hover:bg-surface-hover hover:text-fg disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={capturingApp}
+            onClick={() => {
+              setCapturingApp(true);
+              void saveAppScreenshot()
+                .then((written) => flashNotice(written.relative))
+                .catch((e) => flashNotice(e instanceof Error ? e.message : "Could not save screenshot"))
+                .finally(() => setCapturingApp(false));
+            }}
+            title="Capture the visible Chrome tab via Tanit Inspector → docs/assets/screenshot_n.png"
+          >
+            <Camera size={13} />
+            {capturingApp ? "Capturing..." : "Shot"}
+          </button>
+        )}
         <ThemeToggle />
         <button
           class={panelBtnClass(rightPanelOpen)}

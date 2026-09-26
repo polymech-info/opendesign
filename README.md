@@ -12,7 +12,10 @@ Design stills (store listings, feature cards, HD captures) as Fabric canvases on
 disk. A compact Design DSL gives people and agents a shared, editable
 representation for bulk changes, then OpenDesign renders the result to PNG.
 
+[Demo](https://polymech.info/apps/opendesign) | Provided by [Polymech](https://service.polymech.info/) | [Github Sourcecode](https://github.com/polymech-info/opendesign)
+
 ## Quick start
+
 
 ```bash
 npm i -g @polymech/opendesign

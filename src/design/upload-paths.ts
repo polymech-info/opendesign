@@ -1,6 +1,8 @@
 /** Normalize model/host paths to OpenDesign upload keys (under .OpenDesign/). */
 export function normalizeUploadKey(raw: string): string {
-  let key = raw.trim().replace(/\\/g, "/");
+  const trimmed = raw.trim();
+  if (trimmed.startsWith("data:") || trimmed.startsWith("blob:")) return trimmed;
+  let key = trimmed.replace(/\\/g, "/");
   if (key.startsWith("/api/uploads/file/")) key = key.slice("/api/uploads/file/".length);
   if (key.startsWith("http://") || key.startsWith("https://")) {
     const m = key.match(/\/api\/uploads\/file\/(.+)$/);
@@ -14,12 +16,15 @@ export function normalizeUploadKey(raw: string): string {
 }
 
 export function uploadPublicUrl(key: string): string {
+  if (key.startsWith("data:") || key.startsWith("blob:")) return key;
   const safe = normalizeUploadKey(key);
+  if (safe.startsWith("data:") || safe.startsWith("blob:")) return safe;
   return `/api/uploads/file/${safe}`;
 }
 
 /** Accept upload key, relative path, or public URL → canonical upload key. */
 export function resolveUploadKey(src: string): string {
+  if (src.startsWith("data:") || src.startsWith("blob:")) return src;
   const key = normalizeUploadKey(src);
   if (!key.startsWith("uploads/")) {
     if (key.startsWith("backgrounds/")) return `uploads/${key}`;

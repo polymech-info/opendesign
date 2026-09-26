@@ -59,6 +59,7 @@ import {
 } from "../lib/image-crop";
 import { createShapeObject, type ShapeKind } from "../lib/shapes";
 import { api } from "../api";
+import { features } from "../mode";
 import type { LibraryElement } from "../types";
 import {
   isBgImage,
@@ -1171,7 +1172,7 @@ export function useCanvasState() {
         canvas.setActiveObject(activeObj);
         canvas.requestRenderAll();
       }
-      if (opts?.toProject) {
+      if (opts?.toProject && features.projectExport) {
         return api<{ path: string; filename: string; relative: string }>("POST", "/api/export/png", {
           name: opts.name || "design",
           image: dataURL,

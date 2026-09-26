@@ -1,12 +1,14 @@
 import { useEffect } from "preact/hooks";
 import {
   RouterProvider,
+  createHashHistory,
   createRootRoute,
   createRoute,
   createRouter,
   useNavigate,
 } from "@tanstack/react-router";
 import { AppShell, EditorPage, ExportPage, HomePage } from "./app";
+import { webClient } from "./mode";
 
 const rootRoute = createRootRoute({
   component: AppShell,
@@ -42,6 +44,7 @@ function RedirectHome() {
 
 export const router = createRouter({
   routeTree,
+  ...(webClient ? { history: createHashHistory() } : {}),
   trailingSlash: "never",
   defaultPreload: false,
   defaultNotFoundComponent: RedirectHome,

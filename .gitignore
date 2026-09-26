@@ -1,5 +1,7 @@
 node_modules/
 dist/
+dist-site/
+dist-site.tar
 data.db
 data.db-wal
 data.db-shm
@@ -8,3 +10,4 @@ uploads/
 .opend-dev.json
 .env
 *.tgz
+./deploy-web.mjs
