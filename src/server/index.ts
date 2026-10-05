@@ -27,8 +27,10 @@ import { mountLlmProxy, type LlmTarget } from "./llm.js";
 import { mountAgentTools } from "./agent-tools.js";
 import { appendDesignJournal, readDesignJournal } from "./design-journal.js";
 import { mcpDeleteResponse, mcpGetResponse, mcpOptionsResponse, mcpPostResponse } from "../mcp/http.js";
+import { exportDesignPack, importDesignPack } from "./design-pack.js";
 import { loadProjectGuides } from "./project-guides.js";
 import { imageBytesFromDataUrl, pngBytesFromDataUrl, writeDocsAssetScreenshot, writeProjectDesignPng } from "./project-png.js";
+import { pdfBytesFromPayload, writeProjectDesignPdf } from "./project-pdf.js";
 
 export type AppOptions = {
   roots: Roots;
@@ -203,6 +205,8 @@ Lists MERGE both folders (union). Same id/filename: project copy is used; unique
 - POST /api/designs/{id}/versions/{rev}/restore
 - GET/PUT/DELETE /api/designs/{id}
 - POST /api/designs/{id}/duplicate
+- POST /api/designs/export
+- POST /api/designs/import
 - POST /api/designs/{id}/pages
 - PUT/DELETE /api/pages/{pageId}
 - POST /api/pages/{pageId}/duplicate
@@ -213,6 +217,7 @@ Lists MERGE both folders (union). Same id/filename: project copy is used; unique
 - GET/POST /api/styles
 - PUT/DELETE /api/styles/{id}
 - POST /api/export/png
+- POST /api/export/pdf
 - GET/POST /api/uploads
 - GET/DELETE /api/uploads/file/{key}
 - GET /api/icons/search
@@ -486,6 +491,31 @@ Lists MERGE both folders (union). Same id/filename: project copy is used; unique
     return c.json(row, 200);
   });
 
+  app.post("/api/designs/export", async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as { ids?: unknown };
+    const ids = Array.isArray(body.ids)
+      ? body.ids.filter((id): id is string => typeof id === "string" && id.trim().length > 0)
+      : [];
+    try {
+      const targets = ids.length ? ids : store.listDesigns(roots).map((design) => design.id);
+      return c.json(await exportDesignPack(roots, targets), 200);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Export failed";
+      const status = message.startsWith("Design not found") ? 404 : 400;
+      return c.json({ error: message }, status);
+    }
+  });
+
+  app.post("/api/designs/import", async (c) => {
+    const body = (await c.req.json().catch(() => null)) as { pack?: unknown } | null;
+    if (!body || body.pack == null) return c.json({ error: "Expected { pack }" }, 400);
+    try {
+      return c.json(await importDesignPack(roots, body.pack), 200);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : "Import failed" }, 400);
+    }
+  });
+
   const deleteDesign = createRoute({
     method: "delete",
     path: "/api/designs/{id}",
@@ -612,6 +642,16 @@ Lists MERGE both folders (union). Same id/filename: project copy is used; unique
     const row = store.getTemplate(roots, id);
     if (!row) return c.json({ error: "Not found" }, 404);
     return c.json(row, 200);
+  });
+
+  app.post("/api/export/pdf", async (c) => {
+    const body = (await c.req.json().catch(() => null)) as { name?: unknown; pdf?: unknown } | null;
+    const name = typeof body?.name === "string" ? body.name : "design";
+    const pdf = typeof body?.pdf === "string" ? body.pdf : "";
+    const bytes = pdfBytesFromPayload(pdf);
+    if (!bytes) return c.json({ error: "Expected a PDF data URL" }, 400);
+    if (bytes.length > 25 * 1024 * 1024) return c.json({ error: "PDF too large" }, 413);
+    return c.json(writeProjectDesignPdf(roots, name, bytes), 200);
   });
 
   app.post("/api/export/png", async (c) => {

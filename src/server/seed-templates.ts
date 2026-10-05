@@ -21,6 +21,72 @@ export interface SeedTemplate {
 
 const leftTop = { originX: "left", originY: "top" } as const;
 
+/** ISO 216 at 96 dpi — same scale as the A4 canvas preset (794×1123). */
+function paperTemplate(
+  id: string,
+  name: string,
+  width: number,
+  height: number,
+  sort_order: number,
+  mm: string
+): SeedTemplate {
+  const margin = Math.round(width * 0.08);
+  const inner = width - margin * 2;
+  const titleSize = Math.max(22, Math.round(width * 0.045));
+  const bodySize = Math.max(13, Math.round(width * 0.022));
+  return {
+    id,
+    name,
+    category: "paper",
+    canvas_json: JSON.stringify({
+      version: "6.0.0",
+      objects: [
+        { type: "Rect", ...leftTop, left: 0, top: 0, width, height, fill: "#ffffff" },
+        { type: "Rect", ...leftTop, left: margin, top: margin, width: inner, height: 3, fill: "#111827" },
+        {
+          type: "Textbox",
+          ...leftTop,
+          left: margin,
+          top: margin + 18,
+          width: inner,
+          text: "Title",
+          fontSize: titleSize,
+          fontFamily: "Playfair Display",
+          fontWeight: "700",
+          fill: "#111827",
+        },
+        {
+          type: "Textbox",
+          ...leftTop,
+          left: margin,
+          top: margin + 18 + titleSize + 16,
+          width: inner,
+          text: "Body copy. Replace this page with your document, flyer, or handout.",
+          fontSize: bodySize,
+          fontFamily: "Inter",
+          fontWeight: "400",
+          fill: "#4b5563",
+        },
+        {
+          type: "Textbox",
+          ...leftTop,
+          left: margin,
+          top: height - margin - bodySize - 4,
+          width: inner,
+          text: `${name}  ·  ${mm}  ·  ${width}×${height}`,
+          fontSize: Math.max(10, bodySize - 2),
+          fontFamily: "Inter",
+          fontWeight: "500",
+          fill: "#9ca3af",
+        },
+      ],
+    }),
+    width,
+    height,
+    sort_order,
+  };
+}
+
 export const SEED_TEMPLATES: SeedTemplate[] = [
   bundledFeatureCardsTemplate(),
   {
@@ -214,4 +280,10 @@ export const SEED_TEMPLATES: SeedTemplate[] = [
     height: 1080,
     sort_order: 4,
   },
+  paperTemplate("paper-a4", "A4 Portrait", 794, 1123, 5, "210×297 mm"),
+  paperTemplate("paper-a4-landscape", "A4 Landscape", 1123, 794, 6, "297×210 mm"),
+  paperTemplate("paper-a5", "A5 Portrait", 559, 794, 7, "148×210 mm"),
+  paperTemplate("paper-a5-landscape", "A5 Landscape", 794, 559, 8, "210×148 mm"),
+  paperTemplate("paper-a6", "A6 Portrait", 397, 559, 9, "105×148 mm"),
+  paperTemplate("paper-a6-landscape", "A6 Landscape", 559, 397, 10, "148×105 mm"),
 ];

@@ -58,7 +58,7 @@ Original: [clawnify/OpenDesign](https://github.com/clawnify/OpenDesign). This fo
 
 - **Copy** on the top toolbar writes the current page as a PNG to the system clipboard
 - **PNG** downloads the same 2× render; Shift-click writes `.OpenDesign/designs/title_n.png`
-- **Shot** on the top toolbar asks the Tanit Inspector Chrome extension for a real tab PNG and writes `docs/assets/screenshot_n.png` under the process cwd
+- **Shot** on the top toolbar asks the tanit chat Chrome extension for a real tab PNG and writes `docs/assets/screenshot_n.png` under the process cwd
 - **JSON** downloads the multi-page canvas document
 - Headless `pm-opendesign export` uses Chrome/Edge on the same canvas (store screenshots)
 
@@ -352,3 +352,10 @@ npm run dev
 MIT. Upstream copyright Clawnify; this fork Polymech. Tabler icons are MIT ([tabler/tabler-icons](https://github.com/tabler/tabler-icons)).
 
 ![](./docs/assets/hopphopp.png)
+
+
+## References
+
+[Design.MD](https://github.com/google-labs-code/design.md)
+[https://impeccable.style/](https://impeccable.style/)
+

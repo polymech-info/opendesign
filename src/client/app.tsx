@@ -130,6 +130,8 @@ export function HomePage() {
       createDesign={designState.createDesign}
       deleteDesign={designState.deleteDesign}
       duplicateDesign={designState.duplicateDesign}
+      exportDesignPack={designState.exportDesignPack}
+      importDesignPack={designState.importDesignPack}
       renameDesign={designState.renameDesign}
       createFromTemplate={designState.createFromTemplate}
       refreshThumbnails={designState.refreshThumbnails}

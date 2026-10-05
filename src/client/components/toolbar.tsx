@@ -1,4 +1,4 @@
-import { useState } from "preact/hooks";
+import { useRef, useState } from "preact/hooks";
 import {
   Undo2,
   Redo2,
@@ -7,6 +7,7 @@ import {
   Maximize,
   Download,
   FileJson,
+  FileText,
   Copy,
   ClipboardCopy,
   Camera,
@@ -20,7 +21,10 @@ import {
   PanelRight,
   BringToFront,
   SendToBack,
+  Package,
+  Upload,
 } from "lucide-preact";
+import { designPackFilename, packToZip, parsePackBytes } from "../../design/design-pack";
 import { useEditor, CANVAS_SIZES } from "../context";
 import { isElementGroup } from "../lib/element-group";
 import { selectedCanvasObjects } from "../lib/object-style";
@@ -64,12 +68,15 @@ export function Toolbar({
     zoomIn,
     zoomOut,
     exportPNG,
+    exportPDF,
     copyDesignToClipboard,
     flashNotice,
     getCanvasJSONForPage,
     pages,
     saveDesign,
     duplicateDesign,
+    exportDesignPack,
+    importDesignPack,
     saving,
     diskNotice,
     activeVersionRev,
@@ -99,6 +106,8 @@ export function Toolbar({
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState("");
   const [capturingApp, setCapturingApp] = useState(false);
+  const [packing, setPacking] = useState(false);
+  const packFileRef = useRef<HTMLInputElement>(null);
 
   const currentSize = CANVAS_SIZES.find(
     (s) => s.width === canvasWidth && s.height === canvasHeight
@@ -154,6 +163,58 @@ export function Toolbar({
     link.href = URL.createObjectURL(blob);
     link.click();
     URL.revokeObjectURL(link.href);
+  };
+
+  const exportPack = async () => {
+    if (!activeDesign || packing) return;
+    setPacking(true);
+    try {
+      await saveDesign({ snapshot: false });
+      const pack = await exportDesignPack([activeDesign.id]);
+      const blob = new Blob([packToZip(pack)], { type: "application/zip" });
+      const href = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.download = designPackFilename(pack.designs.map((design) => design.name));
+      link.href = href;
+      link.click();
+      URL.revokeObjectURL(href);
+      const missing = pack.missing.length ? ` Missing: ${pack.missing.join(", ")}` : "";
+      flashNotice(
+        `Pack: ${pack.designs.length} design, ${pack.assets.length} image${pack.assets.length === 1 ? "" : "s"}.${missing}`
+      );
+    } catch (err) {
+      flashNotice(err instanceof Error ? err.message : "Pack export failed");
+    } finally {
+      setPacking(false);
+    }
+  };
+
+  const importPackFiles = async (list: FileList | null) => {
+    if (!list?.length || packing) return;
+    setPacking(true);
+    try {
+      let imported = 0;
+      let written = 0;
+      const missing: string[] = [];
+      let firstId: string | undefined;
+      for (const file of list) {
+        const result = await importDesignPack(parsePackBytes(new Uint8Array(await file.arrayBuffer())));
+        imported += result.designs.length;
+        written += result.written;
+        missing.push(...result.missing);
+        firstId ??= result.designs[0]?.id;
+      }
+      const miss = missing.length ? ` Missing: ${missing.join(", ")}` : "";
+      flashNotice(
+        `Imported ${imported} design${imported === 1 ? "" : "s"}, ${written} image${written === 1 ? "" : "s"}.${miss}`
+      );
+      if (firstId) navigate(editorHref(firstId, panel ?? "templates"));
+    } catch (err) {
+      flashNotice(err instanceof Error ? err.message : "Pack import failed");
+    } finally {
+      setPacking(false);
+      if (packFileRef.current) packFileRef.current.value = "";
+    }
   };
 
   return (
@@ -387,11 +448,55 @@ export function Toolbar({
         </button>
         <button
           class="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-semibold border border-border-mid cursor-pointer transition-all bg-transparent text-fg-secondary hover:bg-surface-hover hover:text-fg"
+          onClick={(e) => {
+            const name = activeDesign?.name;
+            if (features.projectExport && e.shiftKey) {
+              e.preventDefault();
+              void exportPDF({ toProject: true, name }).then((written) => {
+                if (written?.relative) flashNotice(written.relative);
+              });
+              return;
+            }
+            void exportPDF({ name });
+          }}
+          title={features.projectExport ? "Export as PDF. Shift-click saves to .OpenDesign/designs/title_n.pdf" : "Export as PDF"}
+        >
+          <FileText size={13} />
+          PDF
+        </button>
+        <button
+          class="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-semibold border border-border-mid cursor-pointer transition-all bg-transparent text-fg-secondary hover:bg-surface-hover hover:text-fg"
           onClick={exportJSON}
-          title="Export as JSON"
+          title="Export canvas JSON only (no images)"
         >
           <FileJson size={13} />
           JSON
+        </button>
+        <input
+          ref={packFileRef}
+          type="file"
+          accept=".zip,.odpack.zip,.json,.odpack.json,application/zip,application/json"
+          multiple
+          class="hidden"
+          onChange={(e) => void importPackFiles((e.target as HTMLInputElement).files)}
+        />
+        <button
+          class="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-semibold border border-border-mid cursor-pointer transition-all bg-transparent text-fg-secondary hover:bg-surface-hover hover:text-fg disabled:opacity-50"
+          disabled={packing || !activeDesign}
+          onClick={() => void exportPack()}
+          title="Export this design and its images as a zip"
+        >
+          <Package size={13} />
+          {packing ? "Pack..." : "Pack"}
+        </button>
+        <button
+          class="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-[11px] font-semibold border border-border-mid cursor-pointer transition-all bg-transparent text-fg-secondary hover:bg-surface-hover hover:text-fg disabled:opacity-50"
+          disabled={packing}
+          onClick={() => packFileRef.current?.click()}
+          title="Import a design pack (designs + images)"
+        >
+          <Upload size={13} />
+          Import
         </button>
         <button
           class="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-md text-[11px] font-semibold border-none cursor-pointer transition-all bg-accent text-white hover:bg-accent-hover disabled:opacity-50"
@@ -413,7 +518,7 @@ export function Toolbar({
                 .catch((e) => flashNotice(e instanceof Error ? e.message : "Could not save screenshot"))
                 .finally(() => setCapturingApp(false));
             }}
-            title="Capture the visible Chrome tab via Tanit Inspector → docs/assets/screenshot_n.png"
+            title="Capture the visible Chrome tab via tanit chat → docs/assets/screenshot_n.png"
           >
             <Camera size={13} />
             {capturingApp ? "Capturing..." : "Shot"}

@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "preact/hooks";
+import type { DesignPack, DesignPackImportResult } from "../../design/design-pack";
 import type { Design, DesignRevision, DesignVersion, DesignVersionDetail, DesignWithPages, Template, Page } from "../types";
 import { api } from "../api";
 import { bundledFeatureCardsTemplate } from "../../design/example";
@@ -436,6 +437,16 @@ export function useDesigns(getCanvasJSONForPage: (pageId: string) => string) {
     }
   }, [saveDesign]);
 
+  const exportDesignPack = useCallback(async (ids: string[]) => {
+    return api<DesignPack>("POST", "/api/designs/export", { ids });
+  }, []);
+
+  const importDesignPack = useCallback(async (pack: unknown) => {
+    const result = await api<DesignPackImportResult>("POST", "/api/designs/import", { pack });
+    setDesigns(await api<Design[]>("GET", "/api/designs"));
+    return result;
+  }, []);
+
   const renameDesign = useCallback(async (id: string, name: string) => {
     try {
       const updated = await api<Design>("PUT", `/api/designs/${id}`, { name });
@@ -586,6 +597,8 @@ export function useDesigns(getCanvasJSONForPage: (pageId: string) => string) {
     saveDesign,
     deleteDesign,
     duplicateDesign,
+    exportDesignPack,
+    importDesignPack,
     renameDesign,
     setDesignDimensions,
     scheduleSave,

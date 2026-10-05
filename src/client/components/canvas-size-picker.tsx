@@ -4,11 +4,53 @@ import {
   CANVAS_SIZE_MAX,
   CANVAS_SIZE_MIN,
   CANVAS_SIZES,
+  canvasOrientation,
   normalizeCanvasSize,
+  orientedCanvasSize,
+  type CanvasOrientation,
 } from "../lib/canvas-size";
 
 const inputClass =
   "w-full min-w-0 bg-surface-card border border-border-mid rounded-md text-xs text-fg-secondary px-2 py-1.5 outline-none focus:border-accent font-mono";
+
+export function CanvasOrientationField({
+  width,
+  height,
+  onSelect,
+}: {
+  width: number;
+  height: number;
+  onSelect: (width: number, height: number) => void;
+}) {
+  const current = canvasOrientation(width, height);
+  const setOrientation = (next: Exclude<CanvasOrientation, "square">) => {
+    if (current === next) return;
+    const size = orientedCanvasSize(width, height, next);
+    onSelect(size.width, size.height);
+  };
+  return (
+    <div>
+      <label class="text-[11px] text-fg-muted mb-1 block">Orientation</label>
+      <div class="flex gap-1">
+        {(["portrait", "landscape"] as const).map((id) => (
+          <button
+            key={id}
+            type="button"
+            disabled={current === "square"}
+            class={`flex-1 py-1.5 rounded-md border text-[11px] capitalize cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+              current === id
+                ? "border-accent bg-accent/10 text-fg"
+                : "border-border-dim bg-surface-card text-fg-muted hover:border-accent"
+            }`}
+            onClick={() => setOrientation(id)}
+          >
+            {id}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function CustomSizeFields({
   width,
@@ -143,6 +185,11 @@ export function CanvasSizeMenu({
 }) {
   return (
     <div class="min-w-[240px] py-1">
+      {width != null && height != null && (
+        <div class="px-3 pt-2 pb-1">
+          <CanvasOrientationField width={width} height={height} onSelect={onSelect} />
+        </div>
+      )}
       <p class="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-fg-muted">
         Presets
       </p>
@@ -167,6 +214,7 @@ export function CanvasSizePanel({
 }) {
   return (
     <div class="flex flex-col gap-3">
+      <CanvasOrientationField width={width} height={height} onSelect={onSelect} />
       <CustomSizeFields width={width} height={height} onSelect={onSelect} applyLabel="Resize canvas" />
       <div>
         <p class="text-[10px] font-semibold uppercase tracking-wide text-fg-muted mb-1">Presets</p>

@@ -4,6 +4,8 @@ export interface CanvasSize {
   height: number;
 }
 
+export type CanvasOrientation = "portrait" | "landscape" | "square";
+
 export const CANVAS_SIZE_MIN = 100;
 export const CANVAS_SIZE_MAX = 8192;
 
@@ -16,8 +18,28 @@ export const CANVAS_SIZES: CanvasSize[] = [
   { label: "Instagram Story", width: 1080, height: 1920 },
   { label: "9:16 Poster art", width: 720, height: 1080 },
   { label: "Phone", width: 390, height: 844 },
-  { label: "A4", width: 794, height: 1123 },
+  { label: "A4 Portrait", width: 794, height: 1123 },
+  { label: "A4 Landscape", width: 1123, height: 794 },
+  { label: "A5 Portrait", width: 559, height: 794 },
+  { label: "A5 Landscape", width: 794, height: 559 },
+  { label: "A6 Portrait", width: 397, height: 559 },
+  { label: "A6 Landscape", width: 559, height: 397 },
 ];
+
+export function canvasOrientation(width: number, height: number): CanvasOrientation {
+  if (width === height) return "square";
+  return width > height ? "landscape" : "portrait";
+}
+
+export function orientedCanvasSize(
+  width: number,
+  height: number,
+  orientation: Exclude<CanvasOrientation, "square">
+): { width: number; height: number } {
+  const a = Math.max(width, height);
+  const b = Math.min(width, height);
+  return orientation === "landscape" ? { width: a, height: b } : { width: b, height: a };
+}
 
 export function normalizeCanvasSize(
   width: number,

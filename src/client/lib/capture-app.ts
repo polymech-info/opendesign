@@ -11,7 +11,7 @@ function captureVisibleTabViaExtension(): Promise<string> {
       window.removeEventListener("message", onMsg);
       reject(
         new Error(
-          "Tanit Inspector did not capture the tab. Reload the unpacked extension after rebuilding tanit-chrome."
+          "tanit chat did not capture the tab. Reload the unpacked extension after rebuilding tanit-chrome."
         )
       );
     }, 8000);
@@ -33,7 +33,7 @@ function captureVisibleTabViaExtension(): Promise<string> {
         resolve(data.image);
         return;
       }
-      reject(new Error(data.error || "Tanit Inspector capture failed"));
+      reject(new Error(data.error || "tanit chat capture failed"));
     };
     window.addEventListener("message", onMsg);
     window.postMessage({ source: "opend-app", type: "captureVisibleTab", id }, "*");

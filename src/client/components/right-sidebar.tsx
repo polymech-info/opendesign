@@ -45,6 +45,7 @@ import { alignableSelection } from "../lib/align-objects";
 import { isCroppableImage, readImageCrop, setImageCropOrigin, setImageCropZoom } from "../lib/image-crop";
 import { isElementGroup, isInsideElementGroup, elementDisplayName } from "../lib/element-group";
 import { isBgImage, pagePhotoSrc } from "../lib/background-image";
+import { CanvasOrientationField } from "./canvas-size-picker";
 import {
   LINE_DASHES,
   LINE_HEADS,
@@ -940,6 +941,7 @@ export function RightSidebar() {
     setBackground,
     canvasWidth,
     canvasHeight,
+    setCanvasSize,
     activeDesign,
     renameDesign,
     addImageFromClipboard,
@@ -1042,6 +1044,11 @@ export function RightSidebar() {
             <span class="text-[11px] text-fg-muted">Dimensions</span>
             <span class="text-[11px] text-fg-secondary font-mono">{canvasWidth} x {canvasHeight}</span>
           </div>
+          <CanvasOrientationField
+            width={canvasWidth}
+            height={canvasHeight}
+            onSelect={(width, height) => setCanvasSize(width, height)}
+          />
           <BackgroundFillPanel />
           <ImagePickerField
             kind="backgrounds"

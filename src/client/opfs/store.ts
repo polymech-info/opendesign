@@ -1,3 +1,4 @@
+import { applyDesignPack, buildDesignPack, contentTypeForKey } from "../../design/design-pack";
 import { SEED_TEMPLATES } from "../../server/seed-templates";
 import { sanitizeCanvasJSONString } from "../../shared/canvas-json";
 import type {
@@ -450,6 +451,79 @@ async function route(method: string, path: string, query: URLSearchParams, body:
     store.designs.push(row);
     await save(store);
     return withoutPages(row);
+  }
+  if (method === "POST" && path === "/api/designs/export") {
+    const ids = Array.isArray((body as { ids?: unknown } | null)?.ids)
+      ? ((body as { ids: unknown[] }).ids.filter((id) => typeof id === "string" && id.trim()) as string[])
+      : [];
+    const rows = ids.length
+      ? ids.map((id) => {
+          const row = findDesign(store, id);
+          if (!row) throw new HttpError(404, `Design not found: ${id}`);
+          return row;
+        })
+      : [...store.designs];
+    return buildDesignPack(rows, async (key) => {
+      const bytes = await readBytes(key);
+      if (!bytes) return null;
+      const upload = store.uploads.find((item) => item.key === key);
+      return { bytes, contentType: upload?.mime || contentTypeForKey(key) };
+    });
+  }
+  if (method === "POST" && path === "/api/designs/import") {
+    const pack = (body as { pack?: unknown } | null)?.pack;
+    if (pack == null) throw new HttpError(400, "Expected { pack }");
+    const result = await applyDesignPack(pack, {
+      readAsset: (key) => readBytes(key),
+      writeAsset: async (key, bytes, contentType) => {
+        const filename = key.split("/").pop() || key;
+        const kind = key.startsWith("uploads/backgrounds/")
+          ? "backgrounds"
+          : key.startsWith("uploads/icons/")
+            ? "icons"
+            : key.startsWith("uploads/screenshots/")
+              ? "screenshots"
+              : key.startsWith("uploads/thumbs/")
+                ? "thumbs"
+                : "images";
+        await putUpload(store, key, filename, kind, contentType, bytes);
+      },
+      writeDesign: async (design) => {
+        const created = nowIso();
+        const id = crypto.randomUUID();
+        const pagesIn = design.pages.length
+          ? design.pages
+          : [{ title: "Page 1", canvas_json: design.canvas_json, sort_order: 0 }];
+        const pages = pagesIn
+          .slice()
+          .sort((a, b) => a.sort_order - b.sort_order)
+          .map((page, index) => ({
+            id: crypto.randomUUID(),
+            design_id: id,
+            title: page.title || `Page ${index + 1}`,
+            canvas_json: sanitizeCanvasJSONString(page.canvas_json || "{}"),
+            sort_order: page.sort_order ?? index,
+            created_at: created,
+          }));
+        const row: StoredDesign = {
+          id,
+          name: design.name || "Untitled Design",
+          canvas_json: pages[0]?.canvas_json ?? "{}",
+          width: design.width || 1080,
+          height: design.height || 1080,
+          thumbnail_url: design.thumbnail_url,
+          thumbnail_at: design.thumbnail_url ? created : null,
+          created_at: created,
+          updated_at: created,
+          updated_by: "editor",
+          pages,
+        };
+        store.designs.push(row);
+        return { id, name: row.name };
+      },
+    });
+    await save(store);
+    return result;
   }
   if (designId && method === "GET") {
     const row = findDesign(store, decodeURIComponent(designId[1]));

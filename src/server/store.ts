@@ -257,6 +257,51 @@ export function duplicateDesign(roots: Roots, id: string): DesignRecord | null {
   return row;
 }
 
+/** New design and page ids. Upload keys in the canvas are already rewritten. */
+export function importDesignRecord(
+  roots: Roots,
+  input: {
+    name: string;
+    width: number;
+    height: number;
+    canvas_json: string;
+    thumbnail_url: string | null;
+    pages: { title: string; canvas_json: string; sort_order: number }[];
+  },
+): DesignRecord {
+  const id = randomUUID();
+  const created = nowIso();
+  const pagesIn = input.pages.length
+    ? input.pages
+    : [{ title: "Page 1", canvas_json: input.canvas_json || "{}", sort_order: 0 }];
+  const pages: Page[] = pagesIn
+    .slice()
+    .sort((a, b) => a.sort_order - b.sort_order)
+    .map((page, i) => ({
+      id: randomUUID(),
+      design_id: id,
+      title: page.title || `Page ${i + 1}`,
+      canvas_json: sanitizeCanvasJSONString(page.canvas_json || "{}"),
+      sort_order: page.sort_order ?? i,
+      created_at: created,
+    }));
+  const row: DesignRecord = {
+    id,
+    name: input.name || "Untitled Design",
+    canvas_json: pages[0]?.canvas_json ?? sanitizeCanvasJSONString(input.canvas_json || "{}"),
+    width: input.width || 1080,
+    height: input.height || 1080,
+    thumbnail_url: input.thumbnail_url,
+    thumbnail_at: input.thumbnail_url ? created : null,
+    created_at: created,
+    updated_at: created,
+    updated_by: "editor",
+    pages,
+  };
+  writeLayer(roots, "designs", "project", row);
+  return row;
+}
+
 function saveDesignRecord(roots: Roots, layer: Layer, row: DesignRecord, updatedBy: DesignWriter = "editor") {
   writeLayer(roots, "designs", layer, {
     ...row,

@@ -2,6 +2,8 @@ import { useState, useCallback, useRef, useEffect } from "preact/hooks";
 import * as fabric from "fabric";
 import { loadFabricJSON } from "../lib/fabric-json";
 import { canvasToPngDataUrl, canvasToScreenshotDataUrl, copyCanvasPngToClipboard } from "../lib/export-png";
+import { canvasToPdfBytes, downloadPdfBytes } from "../lib/export-pdf";
+import { pdfToDataUrl } from "../../shared/pdf-from-jpeg";
 import { imageBlobFromClipboard, saveClipboardImageToUploads } from "../lib/clipboard-image";
 import { uploadImageFile, isSvgFile, isSvgUrl } from "../lib/file-drop";
 import {
@@ -1191,6 +1193,37 @@ export function useCanvasState() {
     [getActiveCanvas]
   );
 
+  const exportPDF = useCallback(
+    async (opts?: { toProject?: boolean; name?: string }) => {
+      const canvas = getActiveCanvas();
+      if (!canvas) return null;
+      const activeObj = canvas.getActiveObject();
+      canvas.discardActiveObject();
+      let bytes: Uint8Array;
+      try {
+        bytes = canvasToPdfBytes(canvas, canvasWidth, canvasHeight, 2);
+      } finally {
+        if (activeObj) {
+          canvas.setActiveObject(activeObj);
+          canvas.requestRenderAll();
+        }
+      }
+      const slug = (opts?.name || "design")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "") || "design";
+      if (opts?.toProject && features.projectExport) {
+        return api<{ path: string; filename: string; relative: string }>("POST", "/api/export/pdf", {
+          name: opts.name || "design",
+          pdf: pdfToDataUrl(bytes),
+        });
+      }
+      downloadPdfBytes(bytes, `${slug}.pdf`);
+      return null;
+    },
+    [getActiveCanvas, canvasWidth, canvasHeight]
+  );
+
   const copyDesignToClipboard = useCallback(async (): Promise<boolean> => {
     const canvas = getActiveCanvas();
     if (!canvas) return false;
@@ -1734,6 +1767,7 @@ export function useCanvasState() {
     zoomOut,
     captureCanvasScreenshot,
     exportPNG,
+    exportPDF,
     copyDesignToClipboard,
     getCanvasJSON,
     getCanvasJSONForPage,

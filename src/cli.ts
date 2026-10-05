@@ -5,13 +5,16 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import open from "open";
-import { listDesignsForCli, runExport } from "./cli-export.js";
+import { listDesignsForCli, pickDesign, runExport } from "./cli-export.js";
+import { designPackFilename, packToZip, parsePackBytes } from "./design/design-pack.js";
+import { exportDesignPack, importDesignPack } from "./server/design-pack.js";
 import { exportDslMarkdown, queryDesignDsl } from "./cli-dsl.js";
 import { runCliPrompt } from "./cli-prompt.js";
 import { createOpenDesignApp } from "./server/index.js";
 import { resolveIconDir } from "./server/icon-dir.js";
 import { listenHono } from "./server/listen.js";
 import { resolveRoots } from "./server/paths.js";
+import * as store from "./server/store.js";
 import { mountClient } from "./server/serve-client.js";
 import { devPortFile } from "./server/dev-port.js";
 import { HOST_TOOL_PROVIDER_ID } from "./server/agent-tools.js";
@@ -79,6 +82,8 @@ const HELP = `
   Commands:
     (default)             Start the editor and open the browser
     export [id|name]      Export PNG, or Markdown with --format dsl
+    pack [id|name...]     Export designs and their upload files (.odpack.zip)
+    import <file>         Import a design pack zip or legacy .odpack.json
     dsl [id|name]         Export Design DSL as a Markdown file
     query [id|name] EXPR  Query Design DSL and print JSON
     prompt [id|name] TEXT Prompt the design agent and save its edits
@@ -88,7 +93,8 @@ const HELP = `
   Options:
     --port <number>       Preferred port (default: ${DEFAULT_API_PORT})
     --no-browser          Don't open the browser
-    -o, --out <file>      Output path (export/dsl)
+    -o, --out <file>      Output path (export/dsl/pack)
+    --all                 Pack every design in this folder
     --format <png|dsl>    Export format, default png
     --page <n>            Page number, 1-based
     --scale <n>           PNG multiplier, default 2 (export)
@@ -98,7 +104,7 @@ const HELP = `
     -p, --prompt <text>   Prompt text (alternative to trailing TEXT)
     --model <name>        LLM model/preset, default quick (prompt)
     --max-rounds <n>      Maximum tool-loop rounds, default 8 (prompt)
-    --dry-run             Run tools without saving (prompt)
+    --dry-run             Prompt: run tools without saving. Import: print the pack only
     -h, --help            Show this help
 
   Storage (merged union; project shadows same id/key):
@@ -119,6 +125,8 @@ const preferredPort =
 const commandName = rest.find(
   (a) =>
     a === "export" ||
+    a === "pack" ||
+    a === "import" ||
     a === "dsl" ||
     a === "query" ||
     a === "prompt" ||
@@ -159,6 +167,57 @@ try {
       clientDir,
       iconDir,
     });
+    process.exit(0);
+  }
+
+  if (commandName === "pack") {
+    const queries = rest.slice(commandAt + 1);
+    const roots = resolveRoots(targetDir);
+    const listed = store.listDesigns(roots).map((design) => design.id);
+    let ids: string[];
+    if (flags.has("--all") || queries.length === 0) {
+      if (!listed.length) throw new Error("No designs in this folder.");
+      if (!flags.has("--all") && listed.length > 1) {
+        listDesignsForCli(targetDir);
+        throw new Error("Pass design ids or names, or --all");
+      }
+      ids = listed;
+    } else {
+      const seen = new Set<string>();
+      ids = [];
+      for (const query of queries) {
+        const row = pickDesign(targetDir, query, "pack");
+        if (seen.has(row.id)) continue;
+        seen.add(row.id);
+        ids.push(row.id);
+      }
+    }
+    const pack = await exportDesignPack(roots, ids);
+    const out = path.resolve(targetDir, str("-o", "--out") || designPackFilename(pack.designs.map((d) => d.name)));
+    fs.mkdirSync(path.dirname(out), { recursive: true });
+    fs.writeFileSync(out, packToZip(pack));
+    console.log(out);
+    console.log(`${pack.designs.length} design${pack.designs.length === 1 ? "" : "s"}, ${pack.assets.length} asset${pack.assets.length === 1 ? "" : "s"}`);
+    if (pack.missing.length) console.log(`missing ${pack.missing.join(", ")}`);
+    process.exit(0);
+  }
+
+  if (commandName === "import") {
+    const file = rest[commandAt + 1];
+    if (!file) throw new Error("Pack file is required: pm-opendesign import <file.odpack.zip>");
+    const abs = path.resolve(targetDir, file);
+    const pack = parsePackBytes(new Uint8Array(fs.readFileSync(abs)));
+    if (flags.has("--dry-run")) {
+      console.log(
+        `Would import ${pack.designs.length} design${pack.designs.length === 1 ? "" : "s"}, ${pack.assets.length} asset${pack.assets.length === 1 ? "" : "s"}`,
+      );
+      if (pack.missing.length) console.log(`missing ${pack.missing.join(", ")}`);
+      process.exit(0);
+    }
+    const result = await importDesignPack(resolveRoots(targetDir), pack);
+    for (const design of result.designs) console.log(`${design.name}  ${design.id}`);
+    console.log(`${result.written} asset${result.written === 1 ? "" : "s"} written, ${result.reused} reused`);
+    if (result.missing.length) console.log(`missing ${result.missing.join(", ")}`);
     process.exit(0);
   }
 

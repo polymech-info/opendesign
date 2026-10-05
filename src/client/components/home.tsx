@@ -1,6 +1,13 @@
-import { useState, useCallback, useEffect } from "preact/hooks";
-import { Plus, Trash2, Edit3, Copy, Sparkles, ChevronDown } from "lucide-preact";
+import { useState, useCallback, useEffect, useRef } from "preact/hooks";
+import { Plus, Trash2, Edit3, Copy, Sparkles, ChevronDown, Download, Upload } from "lucide-preact";
 import { ThemeToggle } from "./theme-toggle";
+import {
+  designPackFilename,
+  packToZip,
+  parsePackBytes,
+  type DesignPack,
+  type DesignPackImportResult,
+} from "../../design/design-pack";
 import type { Design, Template } from "../types";
 import { TemplateCard } from "./template-card";
 import { CANVAS_SIZES } from "../context";
@@ -14,6 +21,8 @@ interface HomeProps {
   createDesign: (size?: { width: number; height: number }) => Promise<string | undefined>;
   deleteDesign: (id: string) => Promise<void>;
   duplicateDesign: (id: string) => Promise<string | undefined>;
+  exportDesignPack: (ids: string[]) => Promise<DesignPack>;
+  importDesignPack: (pack: unknown) => Promise<DesignPackImportResult>;
   renameDesign: (id: string, name: string) => Promise<void>;
   createFromTemplate: (template: Template) => Promise<string | undefined>;
   refreshThumbnails: () => Promise<void>;
@@ -26,6 +35,8 @@ export function Home({
   createDesign,
   deleteDesign,
   duplicateDesign,
+  exportDesignPack,
+  importDesignPack,
   renameDesign,
   createFromTemplate,
   refreshThumbnails,
@@ -33,6 +44,10 @@ export function Home({
   const [showSizes, setShowSizes] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
+  const [selected, setSelected] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const handleCreate = useCallback(
     async (size?: { width: number; height: number }) => {
@@ -64,8 +79,70 @@ export function Home({
 
   const designIds = designs.map((d) => d.id).join();
   useEffect(() => {
+    setSelected((prev) => prev.filter((id) => designs.some((design) => design.id === id)));
     void refreshThumbnails();
   }, [refreshThumbnails, designIds]);
+
+  const savePackFile = (pack: DesignPack) => {
+    const blob = new Blob([packToZip(pack)], { type: "application/zip" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = designPackFilename(pack.designs.map((design) => design.name));
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const runExport = async (ids: string[]) => {
+    if (!ids.length || busy) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      const pack = await exportDesignPack(ids);
+      savePackFile(pack);
+      const missing = pack.missing.length ? ` Missing: ${pack.missing.join(", ")}` : "";
+      setNotice(
+        `Exported ${pack.designs.length} design${pack.designs.length === 1 ? "" : "s"} and ${pack.assets.length} image${pack.assets.length === 1 ? "" : "s"}.${missing}`,
+      );
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "Export failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onImportFiles = async (list: FileList | null) => {
+    if (!list?.length || busy) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      let count = 0;
+      let written = 0;
+      const missing: string[] = [];
+      for (const file of list) {
+        const result = await importDesignPack(parsePackBytes(new Uint8Array(await file.arrayBuffer())));
+        count += result.designs.length;
+        written += result.written;
+        missing.push(...result.missing);
+      }
+      const miss = missing.length ? ` Missing: ${missing.join(", ")}` : "";
+      setNotice(
+        `Imported ${count} design${count === 1 ? "" : "s"} and ${written} image${written === 1 ? "" : "s"}.${miss}`,
+      );
+      setSelected([]);
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "Import failed");
+    } finally {
+      setBusy(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
+
+  const toggleSelected = (id: string) => {
+    setSelected((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]));
+  };
+
+  const exportIds = selected.length ? selected : designs.map((design) => design.id);
 
   return (
     <div class="h-full overflow-y-auto bg-surface">
@@ -76,9 +153,37 @@ export function Home({
             <h1 class="text-lg font-bold text-fg m-0">My Designs</h1>
             <p class="text-xs text-fg-muted mt-0.5 m-0">
               {designs.length} design{designs.length !== 1 ? "s" : ""}
+              {selected.length ? ` · ${selected.length} selected` : ""}
             </p>
+            {notice && <p class="text-xs text-fg-secondary mt-1 m-0 max-w-xl">{notice}</p>}
           </div>
           <div class="relative flex items-center gap-2">
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".zip,.odpack.zip,.json,.odpack.json,application/zip,application/json"
+              multiple
+              class="hidden"
+              onChange={(e) => void onImportFiles((e.target as HTMLInputElement).files)}
+            />
+            <button
+              class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border border-border-dim cursor-pointer bg-surface-card text-fg-secondary hover:bg-surface-hover disabled:opacity-50"
+              disabled={busy}
+              title="Import one or more design packs"
+              onClick={() => fileRef.current?.click()}
+            >
+              <Upload size={14} />
+              Import
+            </button>
+            <button
+              class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border border-border-dim cursor-pointer bg-surface-card text-fg-secondary hover:bg-surface-hover disabled:opacity-50"
+              disabled={busy || designs.length === 0}
+              title={selected.length ? "Export selected designs and their images" : "Export every design and its images"}
+              onClick={() => void runExport(exportIds)}
+            >
+              <Download size={14} />
+              {selected.length ? `Export ${selected.length}` : "Export all"}
+            </button>
             <ThemeToggle />
             <button
               class="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold border-none cursor-pointer bg-accent text-white hover:bg-accent-hover transition-all shadow-sm"
@@ -149,16 +254,42 @@ export function Home({
           </div>
         ) : (
           <>
-            <h2 class="text-sm font-semibold text-fg-secondary mb-3 m-0">Recent designs</h2>
+            <div class="flex items-center justify-between mb-3">
+              <h2 class="text-sm font-semibold text-fg-secondary m-0">Recent designs</h2>
+              {designs.length > 1 && (
+                <button
+                  class="text-[11px] text-fg-muted bg-transparent border-none cursor-pointer hover:text-fg"
+                  onClick={() =>
+                    setSelected(selected.length === designs.length ? [] : designs.map((design) => design.id))
+                  }
+                >
+                  {selected.length === designs.length ? "Clear selection" : "Select all"}
+                </button>
+              )}
+            </div>
             <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
               {designs.map((d) => (
                 <div
                   key={d.id}
-                  class="bg-surface-card rounded-xl border border-border-dim overflow-hidden cursor-pointer transition-all hover:border-accent hover:shadow-md group"
+                  class={`bg-surface-card rounded-xl border overflow-hidden cursor-pointer transition-all hover:border-accent hover:shadow-md group ${
+                    selected.includes(d.id) ? "border-accent" : "border-border-dim"
+                  }`}
                   onClick={() => navigate(editorHref(d.id, DEFAULT_EDITOR_PANEL))}
                 >
                   {/* Preview area */}
-                  <div class="aspect-[4/3] bg-surface-muted flex items-center justify-center">
+                  <div class="relative aspect-[4/3] bg-surface-muted flex items-center justify-center">
+                    <label
+                      class="absolute top-2 left-2 z-10 flex items-center justify-center w-5 h-5 rounded bg-surface-card/90 border border-border-dim cursor-pointer"
+                      title="Select"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <input
+                        type="checkbox"
+                        class="cursor-pointer"
+                        checked={selected.includes(d.id)}
+                        onChange={() => toggleSelected(d.id)}
+                      />
+                    </label>
                     {d.thumbnail_url ? (
                       <img
                         src={thumbnailCacheSrc(d.thumbnail_url, d.thumbnail_at || d.updated_at)}
@@ -199,6 +330,17 @@ export function Home({
                           </p>
                         </div>
                         <div class="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity ml-2 shrink-0">
+                          <button
+                            class="p-1 rounded text-fg-muted bg-transparent border-none cursor-pointer hover:text-fg transition-colors"
+                            title="Export this design and its images"
+                            disabled={busy}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void runExport([d.id]);
+                            }}
+                          >
+                            <Download size={12} />
+                          </button>
                           <button
                             class="p-1 rounded text-fg-muted bg-transparent border-none cursor-pointer hover:text-fg transition-colors"
                             title="Duplicate"

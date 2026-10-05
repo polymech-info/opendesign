@@ -7,20 +7,8 @@ import type { LayerItem } from "./hooks/use-canvas";
 import type { IconPick } from "./lib/iconify-icons";
 import type { ShapeKind } from "./lib/shapes";
 
-export interface CanvasSize {
-  label: string;
-  width: number;
-  height: number;
-}
-
-export const CANVAS_SIZES: CanvasSize[] = [
-  { label: "LinkedIn Square", width: 1080, height: 1080 },
-  { label: "LinkedIn Landscape", width: 1200, height: 627 },
-  { label: "LinkedIn Portrait", width: 1200, height: 1500 },
-  { label: "Instagram Story", width: 1080, height: 1920 },
-  { label: "9:16 Poster art", width: 720, height: 1080 },
-  { label: "Screenshot / HD", width: 1920, height: 1080 },
-];
+export type { CanvasSize } from "./lib/canvas-size";
+export { CANVAS_SIZES } from "./lib/canvas-size";
 
 export interface EditorContextValue {
   // Canvas (multi-canvas)
@@ -85,6 +73,7 @@ export interface EditorContextValue {
   zoomOut: () => void;
   captureCanvasScreenshot: () => string | null;
   exportPNG: (opts?: { toProject?: boolean; name?: string }) => Promise<{ path: string; filename: string; relative: string } | null>;
+  exportPDF: (opts?: { toProject?: boolean; name?: string }) => Promise<{ path: string; filename: string; relative: string } | null>;
   copyDesignToClipboard: () => Promise<boolean>;
   getCanvasJSON: () => string;
   getCanvasJSONForPage: (pageId: string) => string;
@@ -119,6 +108,8 @@ export interface EditorContextValue {
   saveDesign: (opts?: { snapshot?: boolean }) => Promise<void>;
   deleteDesign: (id: string) => Promise<void>;
   duplicateDesign: (id: string) => Promise<string | undefined>;
+  exportDesignPack: (ids: string[]) => Promise<import("../design/design-pack").DesignPack>;
+  importDesignPack: (pack: unknown) => Promise<import("../design/design-pack").DesignPackImportResult>;
   renameDesign: (id: string, name: string) => Promise<void>;
   saving: boolean;
   diskReloadEpoch: number;
