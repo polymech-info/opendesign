@@ -13,6 +13,8 @@ import {
   Eye,
   EyeOff,
   Group as GroupIcon,
+  FlipHorizontal2,
+  LayoutGrid,
   Library,
   Lock,
   Maximize2,
@@ -36,6 +38,8 @@ import { isBgImage } from "../lib/background-image";
 import { stackTargetsFromSelection } from "../lib/layer-stack";
 import { alignableSelection } from "../lib/align-objects";
 import { CREATE_STYLE_EVENT } from "../hooks/use-saved-styles";
+import { RECT_PATTERN_EVENT } from "../lib/rect-pattern";
+import { MIRROR_EVENT } from "../lib/mirror";
 
 type MenuPos = { x: number; y: number };
 
@@ -237,6 +241,18 @@ export function CanvasContextMenu({ pos, onClose }: { pos: MenuPos; onClose: () 
           shortcut="Ctrl+D"
           disabled={!hasSelection}
           onClick={() => run(() => void duplicateSelected())}
+        />
+        <Item
+          icon={<LayoutGrid size={12} />}
+          label="Rectangular pattern"
+          disabled={!hasSelection}
+          onClick={() => run(() => window.dispatchEvent(new Event(RECT_PATTERN_EVENT)))}
+        />
+        <Item
+          icon={<FlipHorizontal2 size={12} />}
+          label="Mirror"
+          disabled={!hasSelection}
+          onClick={() => run(() => window.dispatchEvent(new Event(MIRROR_EVENT)))}
         />
         <Item
           icon={<Trash2 size={12} />}

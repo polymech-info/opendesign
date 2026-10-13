@@ -100,6 +100,22 @@ html.dark .canvas-container {
     0 25px 50px -12px rgba(0, 0, 0, 0.45) !important;
 }
 
+.opend-guide {
+  background: rgba(14, 116, 144, 0.55);
+}
+
+html.dark .opend-guide {
+  background: rgba(103, 232, 249, 0.55);
+}
+
+.opend-guide-half {
+  background: rgba(14, 116, 144, 0.85);
+}
+
+html.dark .opend-guide-half {
+  background: rgba(103, 232, 249, 0.85);
+}
+
 /* ── Custom range slider ───────────────────────────────────────────── */
 input[type="range"]:not(.prop-slider-range) {
   @apply appearance-none bg-transparent cursor-pointer;

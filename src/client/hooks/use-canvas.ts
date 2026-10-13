@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from "preact/hooks";
 import * as fabric from "fabric";
 import { loadFabricJSON } from "../lib/fabric-json";
+import { attachConstructionLines, pageConstructionLines } from "../lib/construction-lines";
 import { canvasToPngDataUrl, canvasToScreenshotDataUrl, copyCanvasPngToClipboard } from "../lib/export-png";
 import { canvasToPdfBytes, downloadPdfBytes } from "../lib/export-pdf";
 import { pdfToDataUrl } from "../../shared/pdf-from-jpeg";
@@ -47,7 +48,8 @@ import {
   readRememberedCopiedObjects,
   writeCopiedObjectsToClipboard,
 } from "../lib/copy-objects";
-import { installSnapGuides } from "../lib/snap-guides";
+import { mirrorPose } from "../lib/mirror";
+import { installSnapGuides, sceneBounds } from "../lib/snap-guides";
 import { installTextEditScrollLock } from "../lib/fabric-text-edit";
 import {
   applyImageCropTransfer,
@@ -407,6 +409,7 @@ export function useCanvasState() {
       }
       noteGlassBackdropSourceChange(target);
       saveHistory(pageId);
+      setSelectionEpoch((n) => n + 1);
     });
     canvas.on("object:removed", (e) => {
       noteGlassBackdropSourceChange(e.target);
@@ -862,6 +865,25 @@ export function useCanvasState() {
     [getActiveCanvas, selectedObject, saveHistorySoon]
   );
 
+  const setSelectionOrigin = useCallback(
+    (next: { x?: number; y?: number }, target?: fabric.FabricObject | null) => {
+      const canvas = getActiveCanvas();
+      const pageId = activeCanvasIdRef.current;
+      const obj = target && target.canvas === canvas ? target : canvas?.getActiveObject();
+      if (!canvas || !pageId || !obj || isBgImage(obj)) return;
+      const box = sceneBounds(obj);
+      const dx = next.x == null ? 0 : next.x - box.left;
+      const dy = next.y == null ? 0 : next.y - box.top;
+      if (Math.abs(dx) < 0.05 && Math.abs(dy) < 0.05) return;
+      if (!nudgeFabricObject(obj, dx, dy)) return;
+      noteGlassBackdropSourceChange(obj);
+      canvas.requestRenderAll();
+      saveHistory(pageId);
+      setSelectionEpoch((n) => n + 1);
+    },
+    [getActiveCanvas, saveHistory]
+  );
+
   const nudgeSelected = useCallback(
     (canvasDx: number, canvasDy: number) => {
       const canvas = getActiveCanvas();
@@ -902,6 +924,96 @@ export function useCanvasState() {
     setSelectionEpoch((n) => n + 1);
     setLayersEpoch((n) => n + 1);
   }, [getActiveCanvas, selectedObject]);
+
+  const applyRectangularPattern = useCallback(
+    async (sources: fabric.FabricObject[], offsets: { dx: number; dy: number }[]) => {
+      const canvas = getActiveCanvas();
+      const pageId = activeCanvasIdRef.current;
+      const live = sources.filter((obj) => obj.canvas === canvas && !isBgImage(obj));
+      if (!canvas || !pageId || live.length === 0 || offsets.length === 0) return;
+      isRestoringRef.current.add(pageId);
+      const clones: fabric.FabricObject[] = [];
+      try {
+        for (const offset of offsets) {
+          clones.push(...(await cloneLiveObjects(canvas, live, offset)));
+        }
+      } finally {
+        isRestoringRef.current.delete(pageId);
+      }
+      if (clones.length === 0) return;
+      if (clones.length === 1) {
+        canvas.setActiveObject(clones[0]);
+        setSelectedObject(clones[0]);
+      } else {
+        canvas.setActiveObject(new fabric.ActiveSelection(clones, { canvas }));
+        setSelectedObject(clones[0]);
+      }
+      saveHistory(pageId);
+      setLayersEpoch((n) => n + 1);
+      setSelectionEpoch((n) => n + 1);
+    },
+    [getActiveCanvas, saveHistory]
+  );
+
+  const applyMirror = useCallback(
+    async (sources: fabric.FabricObject[], axis: "x" | "y", at: number, preserveOrientation = false) => {
+      const canvas = getActiveCanvas();
+      const pageId = activeCanvasIdRef.current;
+      const live = sources.filter((obj) => obj.canvas === canvas && !isBgImage(obj));
+      if (!canvas || !pageId || live.length === 0 || !Number.isFinite(at)) return;
+      const posed = live.map((obj) => {
+        const center = obj.getCenterPoint();
+        return {
+          obj,
+          pose: {
+            x: center.x,
+            y: center.y,
+            angle: obj.getTotalAngle(),
+            scaleX: obj.scaleX ?? 1,
+            scaleY: obj.scaleY ?? 1,
+            skewX: obj.skewX || 0,
+            skewY: obj.skewY || 0,
+          },
+        };
+      });
+      isRestoringRef.current.add(pageId);
+      const clones: fabric.FabricObject[] = [];
+      try {
+        if (canvas.getActiveObject() instanceof fabric.ActiveSelection) canvas.discardActiveObject();
+        for (const item of posed) {
+          const created = await cloneLiveObjects(canvas, [item.obj], { dx: 0, dy: 0 });
+          const clone = created[0];
+          if (!clone) continue;
+          const next = mirrorPose(item.pose, axis, at, preserveOrientation);
+          clone.set({
+            angle: next.angle,
+            scaleX: next.scaleX,
+            scaleY: next.scaleY,
+            skewX: next.skewX,
+            skewY: next.skewY,
+          });
+          clone.setPositionByOrigin(new fabric.Point(next.x, next.y), "center", "center");
+          clone.setCoords();
+          clones.push(clone);
+        }
+      } finally {
+        isRestoringRef.current.delete(pageId);
+      }
+      if (clones.length === 0) return;
+      if (clones.length === 1) {
+        canvas.setActiveObject(clones[0]);
+        setSelectedObject(clones[0]);
+      } else {
+        canvas.setActiveObject(new fabric.ActiveSelection(clones, { canvas }));
+        setSelectedObject(clones[0]);
+      }
+      canvas.requestRenderAll();
+      saveHistory(pageId);
+      setLayersEpoch((n) => n + 1);
+      setSelectionEpoch((n) => n + 1);
+    },
+    [getActiveCanvas, saveHistory]
+  );
 
   const copySelectedObjects = useCallback(() => {
     const canvas = getActiveCanvas();
@@ -1254,7 +1366,9 @@ export function useCanvasState() {
     (pageId: string) => {
       const canvas = canvasMapRef.current.get(pageId);
       if (!canvas) return "{}";
-      return canvasHistoryJSON(canvas);
+      const json = canvasHistoryJSON(canvas);
+      const lines = pageConstructionLines(pageId);
+      return lines == null ? json : attachConstructionLines(json, lines);
     },
     [canvasHistoryJSON],
   );
@@ -1745,9 +1859,12 @@ export function useCanvasState() {
     setBackground,
     lockSelectedAsBackground,
     updateSelectedObject,
+    setSelectionOrigin,
     copySelectedObjects,
     pasteCopiedCanvasObjects,
     duplicateSelected,
+    applyRectangularPattern,
+    applyMirror,
     copySelectedStyle,
     pasteSelectedStyle,
     applyCopiedObjectStyle,

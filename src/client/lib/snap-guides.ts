@@ -1,5 +1,6 @@
 import * as fabric from "fabric";
 import { isBgImage } from "./background-image";
+import { constructionSnapValues } from "./construction-lines";
 import { isIconObject } from "./tabler-icons";
 
 /** Scene-space grid, matching draw.io's default raster. */
@@ -188,6 +189,18 @@ function yFeatures(box: Bounds): AxisFeature[] {
   ];
 }
 
+function constructionFeatures(values: number[], start: number, end: number): AxisFeature[] {
+  const out: AxisFeature[] = [];
+  for (const value of values) {
+    out.push(
+      { kind: "min", value, start, end },
+      { kind: "mid", value, start, end },
+      { kind: "max", value, start, end },
+    );
+  }
+  return out;
+}
+
 function applySceneDelta(obj: fabric.FabricObject, dx: number, dy: number) {
   if (!dx && !dy) return;
   const parent = obj.group;
@@ -337,14 +350,24 @@ export function snapResizeDelta(
   page: Bounds,
   others: Bounds[],
   tolerance = SNAP_TOLERANCE,
-  dir = 0
+  dir = 0,
+  edgeOnly = false
 ): AxisSnap | null {
   const axis = edge === "left" || edge === "right" ? "x" : "y";
   const pinned: FeatureKind = edge === "left" || edge === "top" ? "max" : "min";
-  const movers = (axis === "x" ? xFeatures(box) : yFeatures(box)).filter((f) => f.kind !== pinned);
+  const moving: FeatureKind = edge === "left" || edge === "top" ? "min" : "max";
+  const features = axis === "x" ? xFeatures(box) : yFeatures(box);
+  // Scale snaps the edge under the pointer. The center is a mover too, and a line
+  // through the middle would otherwise resize the object onto its center.
+  const movers = features.filter((f) => (edgeOnly ? f.kind === moving : f.kind !== pinned));
   const targets = [
     ...(axis === "x" ? xFeatures(page) : yFeatures(page)),
     ...others.flatMap(axis === "x" ? xFeatures : yFeatures),
+    ...constructionFeatures(
+      constructionSnapValues(axis),
+      axis === "x" ? page.top : page.left,
+      axis === "x" ? page.bottom : page.right,
+    ),
   ];
   return snapAxis(movers, targets, tolerance, dir);
 }
@@ -513,6 +536,170 @@ export function snapResizingEdge(
   return { dx, dy };
 }
 
+const SCALE_EDGES: Record<string, ResizeEdge[]> = {
+  ml: ["left"],
+  mr: ["right"],
+  mt: ["top"],
+  mb: ["bottom"],
+  tl: ["left", "top"],
+  tr: ["right", "top"],
+  bl: ["left", "bottom"],
+  br: ["right", "bottom"],
+};
+
+function edgeCoord(box: Bounds, edge: ResizeEdge) {
+  if (edge === "left") return box.left;
+  if (edge === "right") return box.right;
+  if (edge === "top") return box.top;
+  return box.bottom;
+}
+
+function scaleFactor(pin: number, current: number, delta: number) {
+  const span = current - pin;
+  if (Math.abs(span) < 1) return null;
+  const factor = (current + delta - pin) / span;
+  if (!Number.isFinite(factor) || factor < 0.05) return null;
+  return factor;
+}
+
+function scaleGuide(edge: ResizeEdge, hit: AxisSnap): SnapGuide {
+  if (edge === "left" || edge === "right") {
+    return {
+      x1: hit.at,
+      y1: Math.min(hit.moverStart, hit.targetStart),
+      x2: hit.at,
+      y2: Math.max(hit.moverEnd, hit.targetEnd),
+    };
+  }
+  return {
+    x1: Math.min(hit.moverStart, hit.targetStart),
+    y1: hit.at,
+    x2: Math.max(hit.moverEnd, hit.targetEnd),
+    y2: hit.at,
+  };
+}
+
+/** Snap the dragged edge to construction lines, neighbors, and the page while scaling or resizing. */
+export function snapScalingObject(
+  canvas: fabric.Canvas,
+  target: fabric.FabricObject,
+  evt?: Event | null,
+  transform?: { corner?: string; originX?: fabric.TOriginX; originY?: fabric.TOriginY; target?: fabric.FabricObject } | null,
+  mode: "scale" | "resize" = "scale"
+) {
+  if ((evt as MouseEvent | undefined)?.altKey) {
+    guidesByCanvas.set(canvas, []);
+    return;
+  }
+  const live = transform ?? canvas._currentTransform;
+  const corner = live?.corner;
+  const originX = live?.originX;
+  const originY = live?.originY;
+  const edges = corner ? SCALE_EDGES[corner] : undefined;
+  if (!edges || !originX || !originY || live?.target !== target) {
+    guidesByCanvas.set(canvas, []);
+    return;
+  }
+  const drag = noteDragDirection(canvas, evt);
+  const box = sceneBounds(target);
+  const page = pageBounds(canvas);
+  const others = collectTargets(canvas, movingSubtree(target), ancestorSet(target));
+  const hits: { edge: ResizeEdge; hit: AxisSnap; factor: number }[] = [];
+  const localPin = target.getPointByOrigin(originX, originY);
+  const parent = target.group;
+  const scenePin =
+    parent && !(parent instanceof fabric.ActiveSelection)
+      ? fabric.util.transformPoint(localPin, parent.calcTransformMatrix())
+      : localPin;
+  for (const edge of edges) {
+    const dir = edge === "left" || edge === "right" ? drag.dirX : drag.dirY;
+    const hit = snapResizeDelta(box, edge, page, others, SNAP_TOLERANCE, dir, true);
+    if (!hit) continue;
+    const horizontal = edge === "left" || edge === "right";
+    const factor = scaleFactor(horizontal ? scenePin.x : scenePin.y, edgeCoord(box, edge), hit.delta);
+    if (factor == null) continue;
+    hits.push({ edge, hit, factor });
+  }
+  if (hits.length === 0) {
+    guidesByCanvas.set(canvas, []);
+    return;
+  }
+  const key = canvas.uniScaleKey || "shiftKey";
+  const toggled = Boolean(evt && key in evt && (evt as unknown as Record<string, boolean>)[key]);
+  const proportional =
+    mode === "scale" &&
+    edges.length === 2 &&
+    ((canvas.uniformScaling && !toggled) || (!canvas.uniformScaling && toggled)) &&
+    !target.lockScalingX &&
+    !target.lockScalingY;
+  const chosen =
+    proportional && hits.length > 1
+      ? [hits.reduce((a, b) => (Math.abs(a.factor - 1) <= Math.abs(b.factor - 1) ? a : b))]
+      : hits;
+  if (mode === "resize") {
+    let width = target.width || 1;
+    let height = target.height || 1;
+    for (const c of chosen) {
+      if (c.edge === "left" || c.edge === "right") width = Math.max(1, width * c.factor);
+      else height = Math.max(1, height * c.factor);
+    }
+    target.set({ width, height });
+  } else if (proportional) {
+    const factor = chosen[0].factor;
+    target.set({
+      scaleX: (target.scaleX || 1) * factor,
+      scaleY: (target.scaleY || 1) * factor,
+    });
+  } else {
+    let scaleX = target.scaleX || 1;
+    let scaleY = target.scaleY || 1;
+    for (const c of chosen) {
+      if (c.edge === "left" || c.edge === "right") {
+        if (!target.lockScalingX) scaleX *= c.factor;
+      } else if (!target.lockScalingY) {
+        scaleY *= c.factor;
+      }
+    }
+    target.set({ scaleX, scaleY });
+  }
+  target.setPositionByOrigin(localPin, originX, originY);
+  target.setCoords();
+  const after = sceneBounds(target);
+  let width = target.width || 1;
+  let height = target.height || 1;
+  let scaleX = target.scaleX || 1;
+  let scaleY = target.scaleY || 1;
+  let nudged = false;
+  for (const c of chosen) {
+    const got = edgeCoord(after, c.edge);
+    if (Math.abs(got - c.hit.at) <= 0.5) continue;
+    const horizontal = c.edge === "left" || c.edge === "right";
+    const pinAt = horizontal ? scenePin.x : scenePin.y;
+    const span = got - pinAt;
+    if (Math.abs(span) < 1) continue;
+    const next = (c.hit.at - pinAt) / span;
+    if (!Number.isFinite(next) || next < 0.05) continue;
+    nudged = true;
+    if (mode === "resize") {
+      if (horizontal) width = Math.max(1, width * next);
+      else height = Math.max(1, height * next);
+    } else if (proportional) {
+      scaleX *= next;
+      scaleY *= next;
+    } else if (horizontal) {
+      if (!target.lockScalingX) scaleX *= next;
+    } else if (!target.lockScalingY) {
+      scaleY *= next;
+    }
+  }
+  if (nudged) {
+    target.set(mode === "resize" ? { width, height } : { scaleX, scaleY });
+    target.setPositionByOrigin(localPin, originX, originY);
+    target.setCoords();
+  }
+  guidesByCanvas.set(canvas, chosen.map((c) => scaleGuide(c.edge, c.hit)));
+}
+
 function pickAxisSnap(objectSnap: AxisSnap | null, canvasSnap: AxisSnap | null, dir: number) {
   if (canvasSnap && directionScore(canvasSnap.kind, dir) < 0) return canvasSnap;
   if (objectSnap && canvasSnap) {
@@ -632,6 +819,8 @@ export function snapMovingObject(
   const yMovers = moverBoxes.flatMap(yFeatures);
   const xTargets = others.flatMap(xFeatures);
   const yTargets = others.flatMap(yFeatures);
+  xTargets.push(...constructionFeatures(constructionSnapValues("x"), page.top, page.bottom));
+  yTargets.push(...constructionFeatures(constructionSnapValues("y"), page.left, page.right));
 
   const objectX = snapAxis(xMovers, xTargets, SNAP_TOLERANCE, drag.dirX);
   const objectY = snapAxis(yMovers, yTargets, SNAP_TOLERANCE, drag.dirY);
@@ -713,6 +902,18 @@ export function installSnapGuides(canvas: fabric.Canvas) {
     snapMovingObject(canvas, target, e.e, { grid: false });
     scheduleGridSnap(canvas, target);
   });
+  const snapScale = (e: { target?: fabric.FabricObject; e?: Event; transform?: fabric.Transform }) => {
+    const target = e.target;
+    if (!target || isBgImage(target)) return;
+    snapScalingObject(canvas, target, e.e, e.transform, "scale");
+  };
+  const snapResize = (e: { target?: fabric.FabricObject; e?: Event; transform?: fabric.Transform }) => {
+    const target = e.target;
+    if (!target || isBgImage(target)) return;
+    snapScalingObject(canvas, target, e.e, e.transform, "resize");
+  };
+  canvas.on("object:scaling", snapScale);
+  canvas.on("object:resizing", snapResize);
   // Before object:modified so undo stores the gridded position.
   canvas.on("mouse:up:before", (e) => {
     clearGridTimer(canvas);

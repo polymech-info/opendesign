@@ -46,6 +46,9 @@ import { isCroppableImage, readImageCrop, setImageCropOrigin, setImageCropZoom }
 import { isElementGroup, isInsideElementGroup, elementDisplayName } from "../lib/element-group";
 import { isBgImage, pagePhotoSrc } from "../lib/background-image";
 import { CanvasOrientationField } from "./canvas-size-picker";
+import { DesignLengthInput } from "./design-length-input";
+import { subscribeMeasureUnit, type MeasureUnit } from "../lib/canvas-rulers";
+import { sceneBounds } from "../lib/snap-guides";
 import {
   LINE_DASHES,
   LINE_HEADS,
@@ -289,6 +292,50 @@ function RotateSkewFields({
         suffix="°"
         onChange={(next) => onChange({ skewY: next })}
       />
+    </div>
+  );
+}
+
+function PositionFields({
+  obj,
+  unit,
+  canvasWidth,
+  canvasHeight,
+  onCommit,
+}: {
+  obj: fabric.FabricObject | null | undefined;
+  unit: MeasureUnit;
+  canvasWidth: number;
+  canvasHeight: number;
+  onCommit: (axis: "x" | "y", px: number) => void;
+}) {
+  if (!obj) return null;
+  const box = sceneBounds(obj);
+  const fieldClass =
+    "w-full min-w-0 bg-surface-card border border-border-mid rounded-md text-xs text-fg-secondary px-2 py-1.5 outline-none focus:border-accent font-mono tabular-nums";
+  return (
+    <div>
+      <label class="text-[11px] text-fg-muted mb-1 block">Position</label>
+      <div class="grid grid-cols-2 gap-2">
+        <DesignLengthInput
+          label="X"
+          value={box.left}
+          unit={unit}
+          span={canvasWidth}
+          className={fieldClass}
+          title="Top left. Applies when the field loses focus."
+          onCommit={(px) => onCommit("x", px)}
+        />
+        <DesignLengthInput
+          label="Y"
+          value={box.top}
+          unit={unit}
+          span={canvasHeight}
+          className={fieldClass}
+          title="Top left. Applies when the field loses focus."
+          onCommit={(px) => onCommit("y", px)}
+        />
+      </div>
     </div>
   );
 }
@@ -938,6 +985,7 @@ export function RightSidebar() {
     maximizeSelected,
     resetSelectedImage,
     canvas,
+    setSelectionOrigin,
     setBackground,
     canvasWidth,
     canvasHeight,
@@ -950,6 +998,8 @@ export function RightSidebar() {
     replaceSelectedImage,
   } =
     useEditor();
+  const [measureUnit, setMeasureUnit] = useState<MeasureUnit>("px");
+  useEffect(() => subscribeMeasureUnit(setMeasureUnit), []);
   const isText = selectedObject instanceof fabric.Textbox || selectedObject instanceof fabric.IText;
   const isBg = isBgImage(selectedObject);
   const isImage = selectedObject instanceof fabric.FabricImage && !isBg;
@@ -1223,6 +1273,18 @@ export function RightSidebar() {
         </PanelSection>
 
         <PanelSection title="Transformation">
+          <PositionFields
+            obj={canvas?.getActiveObject() instanceof fabric.ActiveSelection ? canvas.getActiveObject() : selectedObject}
+            unit={measureUnit}
+            canvasWidth={canvasWidth}
+            canvasHeight={canvasHeight}
+            onCommit={(axis, px) =>
+              setSelectionOrigin(
+                axis === "x" ? { x: px } : { y: px },
+                canvas?.getActiveObject() instanceof fabric.ActiveSelection ? canvas.getActiveObject() : selectedObject
+              )
+            }
+          />
           <div>
             <label class="text-[11px] text-fg-muted mb-1 block">Reset</label>
             <div class="flex flex-wrap gap-1">

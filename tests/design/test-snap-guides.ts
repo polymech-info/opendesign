@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 
+import { publishConstructionSnap } from "../../src/client/lib/construction-lines.ts";
 import {
   canvasBoundarySnaps,
   canvasBoundarySnapsY,
@@ -49,5 +50,26 @@ assert.ok(
   edgeHit && Math.abs(edgeHit.point.x - 200) < 1e-6 && Math.abs(edgeHit.point.y - 101) < 1e-6,
   "point snaps along a neighbor vertical edge"
 );
+
+publishConstructionSnap([{ id: "v", axis: "v", at: 200 }]);
+const nearLine = { left: 40, top: 10, right: 196, bottom: 80, cx: 118, cy: 45 };
+const edgeToLine = snapResizeDelta(nearLine, "right", page, [], SNAP_TOLERANCE, 1, true);
+assert.ok(edgeToLine && edgeToLine.kind === "max" && Math.abs(edgeToLine.at - 200) < 1e-6, "scale edge snaps to a vertical construction line");
+assert.ok(edgeToLine && Math.abs(edgeToLine.delta - 4) < 1e-6);
+
+publishConstructionSnap([{ id: "mid", axis: "v", at: 118 }]);
+assert.equal(
+  snapResizeDelta(nearLine, "right", page, [], SNAP_TOLERANCE, 1, true),
+  null,
+  "dragging the right edge does not snap the center onto a construction line"
+);
+const centerSnap = snapResizeDelta(nearLine, "right", page, [], SNAP_TOLERANCE, 0, false);
+assert.ok(centerSnap && centerSnap.kind === "mid", "move/crop can still snap a center to a construction line");
+
+publishConstructionSnap([{ id: "h", axis: "h", at: 40 }]);
+const nearH = { left: 10, top: 36, right: 80, bottom: 120, cx: 45, cy: 78 };
+const topToLine = snapResizeDelta(nearH, "top", page, [], SNAP_TOLERANCE, -1, true);
+assert.ok(topToLine && topToLine.kind === "min" && Math.abs(topToLine.at - 40) < 1e-6, "scale edge snaps to a horizontal construction line");
+publishConstructionSnap([]);
 
 console.log("test:snap-guides PASS");

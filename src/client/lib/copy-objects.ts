@@ -202,7 +202,8 @@ export async function pasteCopiedObjects(
 
 export async function cloneLiveObjects(
   canvas: fabric.Canvas,
-  sources: fabric.FabricObject[]
+  sources: fabric.FabricObject[],
+  shift?: { dx: number; dy: number }
 ): Promise<fabric.FabricObject[]> {
   const ranked = sources
     .filter((obj) => !isBgImage(obj) && !(obj instanceof fabric.ActiveSelection))
@@ -214,7 +215,7 @@ export async function cloneLiveObjects(
   const takenNames = collectGroupNames(canvas);
   const live = ranked.map((entry) => entry.obj);
   const bounds = sceneUnionBounds(live);
-  const { dx, dy } = pasteShift(bounds?.height ?? 0, live.some(isGroupLike));
+  const { dx, dy } = shift ?? pasteShift(bounds?.height ?? 0, live.some(isGroupLike));
   const wasRendering = canvas.renderOnAddRemove;
   canvas.renderOnAddRemove = false;
   try {

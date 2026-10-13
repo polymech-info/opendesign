@@ -1,5 +1,36 @@
 # OpenDesign change log
 
+## 2026-10-13
+
+### Rulers and construction lines
+
+- Each artboard has a top ruler (X) and a left ruler (Y).
+- Double-click a ruler to add a construction line. Double-click the same stop to remove it.
+- Drag a line to move it. Drag it back onto its ruler to remove it.
+- Lines snap to ruler marks, divisions, the canvas half, and other construction lines.
+- Lines belong to the page and save with it. They are not drawn into PNG or PDF.
+- The bottom bar, above Pages, shows the pointer, a px / mm / cm / in / % unit group, and toggles for rulers and construction lines.
+- The same bar shows the selection's top-left and size. X and Y are editable there, and again under Transformation in the properties panel. The value applies when the field loses focus, in the current unit. A selected construction line reports its position the same way, and that position is editable too.
+- In percent, the 50% tick and a line on the canvas half are thicker, and the half snaps to 50.
+- Scaling an object snaps the dragged edge to construction lines.
+
+### Rectangular pattern
+
+- Pattern is on the bottom bar and in the canvas menu (Rectangular pattern).
+- Select the shapes, then a construction line. Both stay selected, and the line fills Axis 1.
+- A vertical line or a left/right edge steps copies sideways. A horizontal line or a top/bottom edge steps them up and down.
+- Inside the dialog you can still pick a construction line or a shape edge for either axis.
+- Distribution is Extent or Spacing. Direction is One direction or Symmetric.
+- Distance accepts px, mm, cm, in, and %. The value applies when the field loses focus. A minus sign flips one direction.
+
+### Mirror
+
+- Mirror is on the bottom bar and in the canvas menu.
+- Select the shapes, then a construction line. The line fills the axis.
+- A vertical line or a left/right edge flips the copy left and right. A horizontal line or a top/bottom edge flips it up and down.
+- The original stays in place. One undo removes the copies.
+- Keep orientation moves each copy across the line without flipping it.
+
 ## 2026-09-23
 
 ### Shape gradients have a stop editor

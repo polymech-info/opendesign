@@ -51,9 +51,20 @@ export interface EditorContextValue {
   ) => void;
   lockSelectedAsBackground: () => void;
   updateSelectedObject: (props: Record<string, unknown>) => void;
+  setSelectionOrigin: (next: { x?: number; y?: number }, target?: fabric.FabricObject | null) => void;
   copySelectedObjects: () => boolean;
   pasteCopiedCanvasObjects: (raw?: string | null) => Promise<boolean>;
   duplicateSelected: () => Promise<void>;
+  applyRectangularPattern: (
+    sources: fabric.FabricObject[],
+    offsets: { dx: number; dy: number }[]
+  ) => Promise<void>;
+  applyMirror: (
+    sources: fabric.FabricObject[],
+    axis: "x" | "y",
+    at: number,
+    preserveOrientation?: boolean
+  ) => Promise<void>;
   copySelectedStyle: () => void;
   pasteSelectedStyle: () => void;
   applyCopiedObjectStyle: (style: import("./lib/object-style").CopiedObjectStyle) => void;
